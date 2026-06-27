@@ -41,11 +41,15 @@ import {
   CLIENTS,
   COLUMN_TITLES,
   INITIAL_ITEMS,
+  RESTORE_COLUMNS,
   STATUS_KEYS,
   appendWorkLogEntry,
+  applyDragLanding,
   findContainer as findContainerIn,
+  getArchivedCards,
   moveCardAcross,
   reorderWithin,
+  setCardStatus,
   updateCard as updateCardIn,
 } from './board.js';
 
@@ -80,6 +84,21 @@ function formatLoggedAt(iso) {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+function describeHistoryEvent(event) {
+  if (!event) return '';
+  if (event.kind === 'status') {
+    const from = event.from ?? 'Not set';
+    const to = event.to ?? 'Not set';
+    return `Status: ${from} → ${to}`;
+  }
+  if (event.kind === 'column') {
+    const from = COLUMN_TITLES[event.from] ?? event.from ?? 'Unknown';
+    const to = COLUMN_TITLES[event.to] ?? event.to ?? 'Unknown';
+    return `Moved: ${from} → ${to}`;
+  }
+  return '';
 }
 
 function CardWidgets({ status, dueDate }) {
@@ -417,7 +436,16 @@ function ProjectedCard({ card, originRect: initialOriginRect, cancelOriginRect, 
   );
 }
 
-function FocusedCardDetails({ card, originRect, onClose, onCardChange }) {
+function FocusedCardDetails({
+  card,
+  originRect,
+  onClose,
+  onCardChange,
+  onStatusChange,
+  pendingStatusChange,
+  onPickRestoreColumn,
+  onCancelPendingStatus,
+}) {
   const [expanded, setExpanded] = useState(false);
   const [target] = useState(getDetailsProjectionTarget);
 
@@ -455,10 +483,16 @@ function FocusedCardDetails({ card, originRect, onClose, onCardChange }) {
   }, [card.id, closeDetails]);
 
   const frame = expanded ? target : originRect;
-  const StatusIcon = (STATUS_META[card.status] ?? { Icon: Inbox }).Icon;
+  const pendingTo = pendingStatusChange?.cardId === card.id ? pendingStatusChange.toStatus : null;
+  const displayedStatus = pendingTo ?? card.status ?? '';
+  const StatusIcon = (STATUS_META[displayedStatus] ?? { Icon: Inbox }).Icon;
 
   const handleField = (field) => (event) => {
     onCardChange(card.id, { [field]: event.target.value });
+  };
+
+  const handleStatusChange = (event) => {
+    onStatusChange(card.id, event.target.value);
   };
 
   return (
@@ -517,11 +551,11 @@ function FocusedCardDetails({ card, originRect, onClose, onCardChange }) {
                 <span>Status</span>
                 <select
                   className="details-meta-input details-meta-select"
-                  value={card.status ?? ''}
-                  onChange={handleField('status')}
+                  value={displayedStatus}
+                  onChange={handleStatusChange}
                 >
                   <option value="">Not set</option>
-                  {Object.keys(STATUS_META).map((status) => (
+                  {STATUS_KEYS.map((status) => (
                     <option key={status} value={status}>
                       {status}
                     </option>
@@ -573,6 +607,34 @@ function FocusedCardDetails({ card, originRect, onClose, onCardChange }) {
             </label>
           </div>
 
+          {pendingTo ? (
+            <div className="details-section restore-picker" role="group" aria-label="Choose a destination column">
+              <div className="details-section-label">Move to…</div>
+              <p className="restore-picker-hint">
+                Change status to <strong>{pendingTo || 'Not set'}</strong>. Pick a column to send this matter back to the active board.
+              </p>
+              <div className="restore-picker-grid">
+                {RESTORE_COLUMNS.map((columnKey) => (
+                  <button
+                    key={columnKey}
+                    type="button"
+                    className="restore-picker-option"
+                    onClick={() => onPickRestoreColumn(card.id, columnKey)}
+                  >
+                    {COLUMN_TITLES[columnKey]}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="restore-picker-cancel"
+                onClick={() => onCancelPendingStatus(card.id)}
+              >
+                Cancel status change
+              </button>
+            </div>
+          ) : null}
+
           <div className="details-section">
             <label className="details-section-label" htmlFor={`description-${card.id}`}>Task description</label>
             <textarea
@@ -607,6 +669,20 @@ function FocusedCardDetails({ card, originRect, onClose, onCardChange }) {
             </div>
           ) : null}
 
+          {Array.isArray(card.history) && card.history.length > 0 ? (
+            <div className="details-section">
+              <div className="details-section-label">History</div>
+              <ul className="history-list">
+                {card.history.map((event, idx) => (
+                  <li key={`${event.at ?? 'na'}-${idx}`} className="history-entry">
+                    <span className="history-entry-time">{formatLoggedAt(event.at)}</span>
+                    <span className="history-entry-text">{describeHistoryEvent(event)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           <div className="details-footer">
             <a
               className="details-footer-link"
@@ -633,7 +709,7 @@ function FocusedCardDetails({ card, originRect, onClose, onCardChange }) {
   );
 }
 
-function ArchiveOverlay({ onClose }) {
+function ArchiveOverlay({ archivedCards, onClose, onCardOpen }) {
   const [expanded, setExpanded] = useState(false);
   const [target] = useState(getDetailsProjectionTarget);
 
@@ -662,6 +738,19 @@ function ArchiveOverlay({ onClose }) {
     ? target
     : { top: window.innerHeight - 80, left: window.innerWidth - 200, width: 160, height: 40 };
 
+  const handleArchivedCardClick = (cardId) => (event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    closeOverlay();
+    window.setTimeout(() => {
+      onCardOpen(cardId, {
+        top: rect.top,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height,
+      });
+    }, 500);
+  };
+
   return (
     <div className={`projection-layer ${expanded ? 'is-open' : ''}`}>
       <button
@@ -687,10 +776,30 @@ function ArchiveOverlay({ onClose }) {
             </button>
           </div>
 
-          <div className="details-section archive-empty">
-            <div className="details-section-label">No archived matters yet</div>
-            <p>Matters set to status <strong>Done</strong> will appear here. Archive view is a placeholder — see roadmap.</p>
-          </div>
+          {archivedCards.length === 0 ? (
+            <div className="details-section archive-empty">
+              <div className="details-section-label">No archived matters yet</div>
+              <p>Matters set to status <strong>Done</strong> appear here. Open one and change its status to send it back to the active board.</p>
+            </div>
+          ) : (
+            <div className="details-section">
+              <div className="details-section-label">{archivedCards.length} archived</div>
+              <ul className="archive-list">
+                {archivedCards.map((card) => (
+                  <li key={card.id}>
+                    <button
+                      type="button"
+                      className="archive-list-item"
+                      onClick={handleArchivedCardClick(card.id)}
+                    >
+                      <span className="archive-list-item-title">{card.title}</span>
+                      {card.client ? <span className="archive-list-item-subtitle">{card.client}</span> : null}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </section>
     </div>
@@ -765,6 +874,7 @@ export default function App() {
   const [projectedCard, setProjectedCard] = useState(null);
   const [focusedCard, setFocusedCard] = useState(null);
   const [isArchiveOpen, setIsArchiveOpen] = useState(false);
+  const [pendingStatusChange, setPendingStatusChange] = useState(null);
   
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -841,12 +951,16 @@ export default function App() {
       }
     };
 
-    if (!activeContainer || !overContainer || activeContainer !== overContainer) {
-      finishDrag();
-      return;
-    }
+    const crossedContainers =
+      activeContainer && draggedFromContainer && activeContainer !== draggedFromContainer;
 
-    setItems((prev) => reorderWithin(prev, { activeId: active.id, overId: over?.id }));
+    if (crossedContainers) {
+      const fromColumn = draggedFromContainer;
+      const now = new Date().toISOString();
+      setItems((prev) => applyDragLanding(prev, active.id, { fromColumn, now }));
+    } else if (activeContainer && overContainer && activeContainer === overContainer) {
+      setItems((prev) => reorderWithin(prev, { activeId: active.id, overId: over?.id }));
+    }
 
     finishDrag();
   };
@@ -857,6 +971,40 @@ export default function App() {
 
   const addWorkLogEntry = useCallback((cardId, entry) => {
     setItems((prev) => appendWorkLogEntry(prev, cardId, entry));
+  }, []);
+
+  const applyStatusChange = useCallback((cardId, newStatus, destinationColumn) => {
+    const now = new Date().toISOString();
+    let result;
+    setItems((prev) => {
+      result = setCardStatus(prev, cardId, newStatus, { now, destinationColumn });
+      return result.items;
+    });
+    if (result?.requiresDestination) {
+      setPendingStatusChange({ cardId, toStatus: newStatus });
+      return { requiresDestination: true };
+    }
+    setPendingStatusChange((current) => (current?.cardId === cardId ? null : current));
+    return { requiresDestination: false };
+  }, []);
+
+  const handleStatusChange = useCallback((cardId, newStatus) => {
+    applyStatusChange(cardId, newStatus);
+  }, [applyStatusChange]);
+
+  const handlePickRestoreColumn = useCallback((cardId, destinationColumn) => {
+    const pending = pendingStatusChange;
+    if (!pending || pending.cardId !== cardId) return;
+    applyStatusChange(cardId, pending.toStatus, destinationColumn);
+  }, [applyStatusChange, pendingStatusChange]);
+
+  const cancelPendingStatus = useCallback((cardId) => {
+    setPendingStatusChange((current) => (current?.cardId === cardId ? null : current));
+  }, []);
+
+  const closeFocusedCard = useCallback(() => {
+    setFocusedCard(null);
+    setPendingStatusChange(null);
   }, []);
 
   const handleCardOpen = (cardId, originRect) => {
@@ -948,7 +1096,7 @@ export default function App() {
           cancelOriginRect={projectedCard.cancelOriginRect}
           onSave={(payload) => {
             if (payload?.status && payload.status !== projectedCardData.status) {
-              updateCard(projectedCard.id, { status: payload.status });
+              applyStatusChange(projectedCard.id, payload.status);
             }
             if (payload?.entry && hasWorkLogContent(payload.entry)) {
               addWorkLogEntry(projectedCard.id, payload.entry);
@@ -974,13 +1122,21 @@ export default function App() {
         <FocusedCardDetails
           card={focusedCardData}
           originRect={focusedCard.originRect}
-          onClose={() => setFocusedCard(null)}
+          onClose={closeFocusedCard}
           onCardChange={updateCard}
+          onStatusChange={handleStatusChange}
+          pendingStatusChange={pendingStatusChange}
+          onPickRestoreColumn={handlePickRestoreColumn}
+          onCancelPendingStatus={cancelPendingStatus}
         />
       ) : null}
 
       {isArchiveOpen ? (
-        <ArchiveOverlay onClose={() => setIsArchiveOpen(false)} />
+        <ArchiveOverlay
+          archivedCards={getArchivedCards(items)}
+          onClose={() => setIsArchiveOpen(false)}
+          onCardOpen={handleCardOpen}
+        />
       ) : null}
     </div>
   );
