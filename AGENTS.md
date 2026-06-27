@@ -25,12 +25,12 @@ The `Vectis Law Command Center` label is a small fixed element in the bottom-rig
 
 ## Files of Interest
 
-- [src/App.jsx](src/App.jsx) — all React components and state.
+- [src/App.jsx](src/App.jsx) — React components, drag/overlay state, orchestration of status changes.
+- [src/board.js](src/board.js) — pure helpers for moves, reorders, status changes, drag landing, work-log and history appends. All board mutations go through these.
+- [src/board.test.js](src/board.test.js) — Vitest coverage of the helpers above.
 - [src/index.css](src/index.css) — design tokens, layout, projection/flip animations, responsive rules.
-- [src/App.css](src/App.css) — intentionally empty; styles are consolidated in `index.css`.
-- [index.html](index.html) — still bears the Vite template `<title>`; not yet rebranded.
 
-Card data is hardcoded in `INITIAL_ITEMS` inside [src/App.jsx](src/App.jsx). There is no backend, no persistence, and no real AI integration yet — see [roadmap.md, State, Persistence & Data Model](roadmap.md#2-state-persistence--data-model).
+Card data is hardcoded in `INITIAL_ITEMS` inside [src/board.js](src/board.js). There is no backend or persistence yet — see [roadmap.md, State, Persistence & Data Model](roadmap.md#2-state-persistence--data-model). No real AI integration yet either.
 
 ## Layout Rules
 
@@ -59,7 +59,7 @@ Client is a true enum on the Matter view — values are constrained to the `CLIE
 
 Triggered when a card is dragged into a *different* column. The overlay copy animates out of the landed card, flips to `WorkLogForm`, and reverses on Save. The form uses the same kicker (`Log work`) + h2 (card title) header as the details view, with an `X` close button on the right.
 
-The form's first field is a **Status** select populated from `STATUS_META` and defaulted to the card's current status. On Save, `WorkLogForm` passes `{ status }` up through `ProjectedCard.handleSave` → `App.onSave`, which applies the patch through `updateCard` before clearing the projection. The form's other fields (description, dates, hours, next steps) remain uncontrolled — see [roadmap.md, Bind the work-log form to card state](roadmap.md#21-bind-the-work-log-form-to-card-state).
+All fields are controlled: **Status** (defaulted to the card's current status), Description, Start date, End date, Est. hours, Next steps. On Save, the form passes both `{ status }` and a full `entry` object (with `loggedAt` timestamp) up through `ProjectedCard.handleSave` → `App.onSave`. Status flows through `applyStatusChange` (which routes through `setCardStatus` for status↔column coupling — see [Status & Column Coupling](#status--column-coupling)). The work-log entry is appended via `appendWorkLogEntry` only if it has any actual content.
 
 Cancel behavior: clicking the `X` discards any unsaved form entry and **reverts the move** — the card returns to its origin column. Two snapshots taken in `handleDragStart` drive this: `preDragItemsRef` (the `items` state) and `preDragRectRef` (the dragged card's `getBoundingClientRect`).
 
@@ -78,9 +78,23 @@ Below the description, a `.details-footer` pins two external links to the bottom
 
 Optional card fields consumed by the details view: `dueDate`, `description`, `tasksUrl`, `timeEntriesUrl`, `taskFolderUrl`. Sample `status` and `dueDate` are populated in `INITIAL_ITEMS`; the other three are not — see [roadmap.md, Populate details-view fields](roadmap.md#23-populate-details-view-fields-on-real-card-data). Links currently call `event.preventDefault()` — see [roadmap.md, Real navigation for details-view links](roadmap.md#24-real-navigation-for-details-view-links). Edits are not persisted across sessions — see [roadmap.md, Backend persistence](roadmap.md#22-backend-persistence).
 
+## Status & Column Coupling
+
+Status and column placement are a **single source of truth**, coordinated by helpers in [src/board.js](src/board.js):
+
+- Status `Waiting` ⟺ column `waiting` (Waiting Response).
+- Status `Done` ⟺ column `archive`.
+
+Two pure entry points drive everything:
+
+- **`setCardStatus(items, cardId, newStatus, { now, destinationColumn })`** — used by Matter view edits and work-log Save. Moves the card into the required column when status is `Waiting` or `Done`, and out of `waiting`/`archive` when status changes away. Stashes `previousColumn` and `previousStatus` on the card so a card returning from `waiting` lands back where it came from. **Refuses** to leave `Done` without an explicit `destinationColumn` — returns `{ requiresDestination: true }` so the UI can prompt.
+- **`applyDragLanding(items, cardId, { fromColumn, now })`** — called from `handleDragEnd` once a drag actually crosses containers. Drops into `waiting` force status `Waiting`; drags out of `waiting` restore `previousStatus` (default `Reviewing`). Drops onto `archive` are blocked at the helper level (`moveCardAcross`).
+
+Both helpers append events to `card.history` so the audit trail stays consistent with state.
+
 ## Archive
 
-An `Archive` button sits in the fixed bottom-right of the viewport, immediately left of the `Vectis Law Command Center` label. Clicking it opens `ArchiveOverlay`, which uses the same projection layer and panel styling as the details view. The current state is a placeholder empty state — no card routing into or out of the archive is wired yet. See [roadmap.md, Archive view, routing, and restore](roadmap.md#14-archive-view-routing-and-restore).
+An `Archive` button sits in the fixed bottom-right of the viewport. Clicking it opens `ArchiveOverlay`, which renders the contents of `items.archive` as a list. Clicking an archived card closes the archive and opens the regular Matter view for that card — changing its status to anything other than `Done` triggers a **destination picker** inside the Matter view (`RESTORE_COLUMNS` × buttons). Until the user picks a column, the status change is held in `App.pendingStatusChange` and not applied; closing the overlay or clicking *Cancel status change* rolls the change back.
 
 ## Animation Model
 
@@ -104,16 +118,13 @@ Mechanics:
 
 These are facts about today's code. The plan to address each lives in [roadmap.md](roadmap.md).
 
-1. Work-log form inputs are uncontrolled; nothing is saved on Save. (The click-to-open details view *does* save edits into card state — see [Card Surfaces](#card-surfaces).)
-2. Card state — including details-view edits — is not persisted across sessions.
-3. `card.status` is a loose string — no enum, no coupling to column placement, no audit log.
-4. Archive view is a placeholder empty state — no routing into or out of the archive yet.
-5. Team columns are hardcoded.
-6. Form labels are visual only — inputs need `id` / `htmlFor`.
-7. `commandMode` toggle does not filter the board.
-8. Details overlay's link fields (`tasksUrl`, `timeEntriesUrl`, `taskFolderUrl`) and `description` fall back to placeholders / `#` hrefs because `INITIAL_ITEMS` does not provide them.
-9. No automated tests (unit or E2E).
-10. Responsive behaviour exists in CSS but has not been validated in a real browser.
+1. Card state is not persisted across sessions — refresh resets everything.
+2. Team columns are hardcoded (`Partner A` … `Associate 2`); no dynamic roster.
+3. `commandMode` toggle does not filter the board.
+4. Details overlay's link fields (`tasksUrl`, `timeEntriesUrl`, `taskFolderUrl`) fall back to `#` because `INITIAL_ITEMS` does not provide them.
+5. No browser E2E tests (Vitest covers the reducer; UI is untested).
+6. Responsive behaviour exists in CSS but has not been validated in a real browser.
+7. No real AI integration — `aiContext` is hand-authored placeholder text.
 
 ## Verification
 
@@ -121,6 +132,7 @@ Known-green commands:
 
 ```bash
 npm run lint
+npm test
 npm run build
 ```
 
@@ -132,7 +144,7 @@ npm run dev -- --host 127.0.0.1
 
 Local URL: `http://127.0.0.1:5173/` (Vite will fall back to `5174` if the port is taken).
 
-Interactive browser testing has not been wired up. Playwright is not installed — see [roadmap.md, Browser E2E tests](roadmap.md#52-browser-e2e-tests).
+Interactive browser testing has not been wired up. Playwright is not installed — see [roadmap.md, Browser E2E tests](roadmap.md#62-browser-e2e-tests).
 
 ## What's Next
 
