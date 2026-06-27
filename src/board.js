@@ -28,8 +28,6 @@ export const COLUMN_TITLES = {
   archive: 'Archive',
 };
 
-export const ACTIVE_BOARD_COLUMNS = ['user-1', 'user-2', 'user-3', 'user-4', 'available', 'waiting'];
-
 export const RESTORE_COLUMNS = ['user-1', 'user-2', 'user-3', 'user-4', 'available', 'waiting'];
 
 export const STATUS_TO_COLUMN = {
@@ -75,7 +73,7 @@ export function requiredColumnFor(status) {
   return STATUS_TO_COLUMN[status] ?? null;
 }
 
-export function isCoupledColumn(column) {
+function isCoupledColumn(column) {
   return column === 'waiting' || column === 'archive';
 }
 

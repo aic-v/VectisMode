@@ -36,7 +36,6 @@ import {
   Building2,
   UserCheck
 } from 'lucide-react';
-import './App.css';
 import {
   CLIENTS,
   COLUMN_TITLES,
@@ -61,6 +60,13 @@ const STATUS_META = {
   'Waiting': { Icon: Clock },
   'Done': { Icon: CheckCircle2 },
 };
+
+const TEAM_COLUMN_IDS = ['user-1', 'user-2', 'user-3', 'user-4'];
+
+const STATUS_COLUMNS = [
+  { id: 'available', Icon: Inbox },
+  { id: 'waiting', Icon: Clock },
+];
 
 function hasWorkLogContent(entry) {
   if (!entry) return false;
@@ -123,8 +129,7 @@ function CardWidgets({ status, dueDate }) {
   );
 }
 
-// --- Sortable Card Component ---
-function SortableCard({ id, card, isDraggingOverlay, isProjectingSource, onOpen }) {
+function SortableCard({ id, card, isProjectingSource, onOpen }) {
   const {
     attributes,
     listeners,
@@ -132,21 +137,17 @@ function SortableCard({ id, card, isDraggingOverlay, isProjectingSource, onOpen 
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: id });
+  } = useSortable({ id });
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
   };
 
-  const isOverlay = isDraggingOverlay;
-
   const dragListeners = isProjectingSource ? {} : listeners;
 
   const handleOpen = (event) => {
-    if (isProjectingSource || isDraggingOverlay) {
-      return;
-    }
+    if (isProjectingSource) return;
 
     const sourceCard = event.currentTarget.closest('.card-scene');
     const sourceRect = sourceCard?.getBoundingClientRect();
@@ -169,7 +170,7 @@ function SortableCard({ id, card, isDraggingOverlay, isProjectingSource, onOpen 
       ref={setNodeRef}
       data-card-id={id}
       style={style}
-      className={`card-scene ${isDragging && !isOverlay ? 'dragging-placeholder' : ''} ${isOverlay ? 'dragging' : ''} ${isProjectingSource ? 'projecting-source' : ''}`}
+      className={`card-scene ${isDragging ? 'dragging-placeholder' : ''} ${isProjectingSource ? 'projecting-source' : ''}`}
       {...attributes}
     >
       <div className="card-inner">
@@ -806,7 +807,6 @@ function ArchiveOverlay({ archivedCards, onClose, onCardOpen }) {
   );
 }
 
-// --- Card Component for Overlay ---
 function CardOverlay({ card }) {
   return (
     <div className="card-scene dragging">
@@ -826,11 +826,8 @@ function CardOverlay({ card }) {
   );
 }
 
-// --- Droppable Container ---
 function Container({ id, title, icon, items, count, projectedCardId, onCardOpen }) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: id,
-  });
+  const { setNodeRef, isOver } = useDroppable({ id });
 
   return (
     <div className={`cutout-panel ${isOver ? 'is-over' : ''}`} ref={setNodeRef}>
@@ -868,14 +865,13 @@ export default function App() {
   const suppressCardOpenUntilRef = useRef(0);
   const preDragItemsRef = useRef(null);
   const preDragRectRef = useRef(null);
-  
-  // Track origin container and projected editor state
+
   const [draggedFromContainer, setDraggedFromContainer] = useState(null);
   const [projectedCard, setProjectedCard] = useState(null);
   const [focusedCard, setFocusedCard] = useState(null);
   const [isArchiveOpen, setIsArchiveOpen] = useState(false);
   const [pendingStatusChange, setPendingStatusChange] = useState(null);
-  
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -1019,15 +1015,15 @@ export default function App() {
     });
   };
 
-  const activeCard = activeId
-    ? Object.values(items).flat().find((i) => i.id === activeId)
-    : null;
+  const allCards = Object.values(items).flat();
+  const activeCard = activeId ? allCards.find((i) => i.id === activeId) : null;
   const projectedCardData = projectedCard
-    ? Object.values(items).flat().find((i) => i.id === projectedCard.id)
+    ? allCards.find((i) => i.id === projectedCard.id)
     : null;
   const focusedCardData = focusedCard
-    ? Object.values(items).flat().find((i) => i.id === focusedCard.id)
+    ? allCards.find((i) => i.id === focusedCard.id)
     : null;
+  const overlayCardId = projectedCard?.id ?? focusedCard?.id;
 
   return (
     <div className="dashboard-container">
@@ -1073,15 +1069,33 @@ export default function App() {
         onDragEnd={handleDragEnd}
       >
         <div className="board-grid">
-          <Container id="user-1" title={COLUMN_TITLES['user-1']} icon={<User size={18}/>} items={items['user-1']} count={items['user-1'].length} projectedCardId={projectedCard?.id ?? focusedCard?.id} onCardOpen={handleCardOpen} />
-          <Container id="user-2" title={COLUMN_TITLES['user-2']} icon={<User size={18}/>} items={items['user-2']} count={items['user-2'].length} projectedCardId={projectedCard?.id ?? focusedCard?.id} onCardOpen={handleCardOpen} />
-          <Container id="user-3" title={COLUMN_TITLES['user-3']} icon={<User size={18}/>} items={items['user-3']} count={items['user-3'].length} projectedCardId={projectedCard?.id ?? focusedCard?.id} onCardOpen={handleCardOpen} />
-          <Container id="user-4" title={COLUMN_TITLES['user-4']} icon={<User size={18}/>} items={items['user-4']} count={items['user-4'].length} projectedCardId={projectedCard?.id ?? focusedCard?.id} onCardOpen={handleCardOpen} />
+          {TEAM_COLUMN_IDS.map((columnId) => (
+            <Container
+              key={columnId}
+              id={columnId}
+              title={COLUMN_TITLES[columnId]}
+              icon={<User size={18} />}
+              items={items[columnId]}
+              count={items[columnId].length}
+              projectedCardId={overlayCardId}
+              onCardOpen={handleCardOpen}
+            />
+          ))}
         </div>
 
         <div className="status-grid">
-          <Container id="available" title={COLUMN_TITLES.available} icon={<Inbox size={18}/>} items={items['available']} count={items['available'].length} projectedCardId={projectedCard?.id ?? focusedCard?.id} onCardOpen={handleCardOpen} />
-          <Container id="waiting" title={COLUMN_TITLES.waiting} icon={<Clock size={18}/>} items={items['waiting']} count={items['waiting'].length} projectedCardId={projectedCard?.id ?? focusedCard?.id} onCardOpen={handleCardOpen} />
+          {STATUS_COLUMNS.map(({ id, Icon }) => (
+            <Container
+              key={id}
+              id={id}
+              title={COLUMN_TITLES[id]}
+              icon={<Icon size={18} />}
+              items={items[id]}
+              count={items[id].length}
+              projectedCardId={overlayCardId}
+              onCardOpen={handleCardOpen}
+            />
+          ))}
         </div>
 
         <DragOverlay>
