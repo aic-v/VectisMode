@@ -1,12 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import {
+  appendHistoryEvent,
   appendWorkLogEntry,
+  applyDragLanding,
   findCard,
   findContainer,
+  getArchivedCards,
   moveCardAcross,
   reorderWithin,
+  requiredColumnFor,
+  setCardStatus,
   updateCard,
 } from './board.js';
+
+const NOW = '2026-06-27T10:00:00.000Z';
 
 const makeBoard = () => ({
   'user-1': [
@@ -20,7 +27,12 @@ const makeBoard = () => ({
   available: [
     { id: 'c5', title: 'E', status: 'Not Started' },
   ],
-  waiting: [],
+  waiting: [
+    { id: 'c6', title: 'F', status: 'Waiting', previousColumn: 'user-1', previousStatus: 'Drafting' },
+  ],
+  archive: [
+    { id: 'c7', title: 'G', status: 'Done', previousColumn: 'user-2', previousStatus: 'Reviewing' },
+  ],
 });
 
 describe('findContainer', () => {
@@ -135,5 +147,175 @@ describe('appendWorkLogEntry', () => {
       { description: 'first', loggedAt: 'a' },
       entry,
     ]);
+  });
+});
+
+describe('requiredColumnFor', () => {
+  it('maps Waiting to waiting', () => {
+    expect(requiredColumnFor('Waiting')).toBe('waiting');
+  });
+  it('maps Done to archive', () => {
+    expect(requiredColumnFor('Done')).toBe('archive');
+  });
+  it('returns null for statuses with no required column', () => {
+    expect(requiredColumnFor('Drafting')).toBeNull();
+    expect(requiredColumnFor('Reviewing')).toBeNull();
+    expect(requiredColumnFor(null)).toBeNull();
+  });
+});
+
+describe('moveCardAcross', () => {
+  it('refuses to drop into the archive container', () => {
+    const board = makeBoard();
+    const next = moveCardAcross(board, { activeId: 'c1', overId: 'archive' });
+    expect(next).toBe(board);
+  });
+});
+
+describe('setCardStatus', () => {
+  it('returns the same board with no change when the status is unchanged', () => {
+    const board = makeBoard();
+    const { items, requiresDestination } = setCardStatus(board, 'c1', 'Reviewing', { now: NOW });
+    expect(requiresDestination).toBe(false);
+    expect(items).toBe(board);
+  });
+
+  it('moves a card to waiting when status changes to Waiting and stashes the previous column', () => {
+    const { items, requiresDestination } = setCardStatus(makeBoard(), 'c1', 'Waiting', { now: NOW });
+    expect(requiresDestination).toBe(false);
+    expect(items['user-1'].map((c) => c.id)).toEqual(['c2']);
+    const moved = items.waiting.find((c) => c.id === 'c1');
+    expect(moved).toMatchObject({ status: 'Waiting', previousColumn: 'user-1', previousStatus: 'Reviewing' });
+  });
+
+  it('moves a card to archive when status changes to Done and stashes the previous column', () => {
+    const { items, requiresDestination } = setCardStatus(makeBoard(), 'c2', 'Done', { now: NOW });
+    expect(requiresDestination).toBe(false);
+    expect(items['user-1'].map((c) => c.id)).toEqual(['c1']);
+    const moved = items.archive.find((c) => c.id === 'c2');
+    expect(moved).toMatchObject({ status: 'Done', previousColumn: 'user-1', previousStatus: 'Drafting' });
+  });
+
+  it('refuses to move out of Done without a destination column', () => {
+    const board = makeBoard();
+    const { items, requiresDestination } = setCardStatus(board, 'c7', 'Drafting', { now: NOW });
+    expect(requiresDestination).toBe(true);
+    expect(items).toBe(board);
+  });
+
+  it('moves out of Done when an explicit destination is provided', () => {
+    const { items, requiresDestination } = setCardStatus(
+      makeBoard(),
+      'c7',
+      'Drafting',
+      { now: NOW, destinationColumn: 'user-3' },
+    );
+    expect(requiresDestination).toBe(false);
+    expect(items.archive.map((c) => c.id)).toEqual([]);
+    const restored = items['user-3'].find((c) => c.id === 'c7');
+    expect(restored).toMatchObject({ status: 'Drafting' });
+    expect(restored.previousColumn).toBeNull();
+    expect(restored.previousStatus).toBeNull();
+  });
+
+  it('moves out of Waiting back to the previous column when status changes to a non-coupled status', () => {
+    const { items } = setCardStatus(makeBoard(), 'c6', 'Drafting', { now: NOW });
+    expect(items.waiting).toEqual([]);
+    const moved = items['user-1'].find((c) => c.id === 'c6');
+    expect(moved).toMatchObject({ status: 'Drafting' });
+    expect(moved.previousColumn).toBeNull();
+    expect(moved.previousStatus).toBeNull();
+  });
+
+  it('appends a status history event', () => {
+    const { items } = setCardStatus(makeBoard(), 'c1', 'Drafting', { now: NOW });
+    const card = items['user-1'].find((c) => c.id === 'c1');
+    expect(card.history).toEqual([
+      { at: NOW, kind: 'status', from: 'Reviewing', to: 'Drafting' },
+    ]);
+  });
+
+  it('appends both status and column history when the move is driven by status', () => {
+    const { items } = setCardStatus(makeBoard(), 'c1', 'Waiting', { now: NOW });
+    const card = items.waiting.find((c) => c.id === 'c1');
+    expect(card.history).toEqual([
+      { at: NOW, kind: 'status', from: 'Reviewing', to: 'Waiting' },
+      { at: NOW, kind: 'column', from: 'user-1', to: 'waiting', reason: 'status' },
+    ]);
+  });
+});
+
+describe('applyDragLanding', () => {
+  it('sets status to Waiting when a card is dragged into the waiting column', () => {
+    const board = makeBoard();
+    const moved = moveCardAcross(board, { activeId: 'c1', overId: 'waiting' });
+    const next = applyDragLanding(moved, 'c1', { fromColumn: 'user-1', now: NOW });
+    const landed = next.waiting.find((c) => c.id === 'c1');
+    expect(landed).toMatchObject({
+      status: 'Waiting',
+      previousColumn: 'user-1',
+      previousStatus: 'Reviewing',
+    });
+  });
+
+  it('restores previousStatus when a card is dragged out of waiting', () => {
+    const board = makeBoard();
+    const moved = moveCardAcross(board, { activeId: 'c6', overId: 'user-2' });
+    const next = applyDragLanding(moved, 'c6', { fromColumn: 'waiting', now: NOW });
+    const landed = next['user-2'].find((c) => c.id === 'c6');
+    expect(landed.status).toBe('Drafting');
+    expect(landed.previousColumn).toBeNull();
+    expect(landed.previousStatus).toBeNull();
+  });
+
+  it('defaults to Reviewing when dragged out of waiting with no previousStatus', () => {
+    const board = makeBoard();
+    board.waiting.push({ id: 'cFresh', title: 'fresh', status: 'Waiting' });
+    const moved = moveCardAcross(board, { activeId: 'cFresh', overId: 'user-2' });
+    const next = applyDragLanding(moved, 'cFresh', { fromColumn: 'waiting', now: NOW });
+    const landed = next['user-2'].find((c) => c.id === 'cFresh');
+    expect(landed.status).toBe('Reviewing');
+  });
+
+  it('records a drag column-change history event', () => {
+    const board = makeBoard();
+    const moved = moveCardAcross(board, { activeId: 'c1', overId: 'user-2' });
+    const next = applyDragLanding(moved, 'c1', { fromColumn: 'user-1', now: NOW });
+    const landed = next['user-2'].find((c) => c.id === 'c1');
+    expect(landed.history).toEqual([
+      { at: NOW, kind: 'column', from: 'user-1', to: 'user-2', reason: 'drag' },
+    ]);
+  });
+
+  it('does nothing when fromColumn equals toColumn', () => {
+    const board = makeBoard();
+    const next = applyDragLanding(board, 'c1', { fromColumn: 'user-1', now: NOW });
+    expect(next).toBe(board);
+  });
+});
+
+describe('appendHistoryEvent', () => {
+  it('appends to a card with no prior history', () => {
+    const event = { at: NOW, kind: 'status', from: 'A', to: 'B' };
+    const next = appendHistoryEvent(makeBoard(), 'c1', event);
+    expect(next['user-1'][0].history).toEqual([event]);
+  });
+
+  it('appends to existing history', () => {
+    const board = makeBoard();
+    board['user-1'][0].history = [{ at: 'earlier', kind: 'status', from: 'X', to: 'Y' }];
+    const event = { at: NOW, kind: 'status', from: 'Y', to: 'Z' };
+    const next = appendHistoryEvent(board, 'c1', event);
+    expect(next['user-1'][0].history).toHaveLength(2);
+  });
+});
+
+describe('getArchivedCards', () => {
+  it('returns the archive container contents', () => {
+    expect(getArchivedCards(makeBoard()).map((c) => c.id)).toEqual(['c7']);
+  });
+
+  it('returns an empty array when archive is missing', () => {
+    expect(getArchivedCards({})).toEqual([]);
   });
 });

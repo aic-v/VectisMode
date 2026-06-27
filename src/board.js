@@ -25,24 +25,35 @@ export const COLUMN_TITLES = {
   'user-4': 'Associate 2',
   waiting: 'Waiting Response',
   available: 'Available',
+  archive: 'Archive',
 };
+
+export const RESTORE_COLUMNS = ['user-1', 'user-2', 'user-3', 'user-4', 'available', 'waiting'];
+
+export const STATUS_TO_COLUMN = {
+  Waiting: 'waiting',
+  Done: 'archive',
+};
+
+export const DEFAULT_RESTORED_STATUS = 'Reviewing';
 
 export const INITIAL_ITEMS = {
   'user-1': [
-    { id: 'c1', title: 'Review MSA for Acme Corp', status: 'Reviewing', dueDate: 'May 25, 2026', client: 'Acme Corp', owner: 'Partner A', team: 'Commercial', aiContext: 'Draft contains standard indemnity clauses. Requires specific review of liability cap.', workLog: [] },
-    { id: 'c2', title: 'Draft Employee Handbook', status: 'Drafting', dueDate: 'Jun 04, 2026', client: 'Internal', owner: 'Partner A', team: 'Employment', aiContext: 'Needs alignment with new remote work policies.', workLog: [] },
+    { id: 'c1', title: 'Review MSA for Acme Corp', status: 'Reviewing', dueDate: 'May 25, 2026', client: 'Acme Corp', owner: 'Partner A', team: 'Commercial', aiContext: 'Draft contains standard indemnity clauses. Requires specific review of liability cap.', workLog: [], history: [] },
+    { id: 'c2', title: 'Draft Employee Handbook', status: 'Drafting', dueDate: 'Jun 04, 2026', client: 'Internal', owner: 'Partner A', team: 'Employment', aiContext: 'Needs alignment with new remote work policies.', workLog: [], history: [] },
   ],
   'user-2': [
-    { id: 'c3', title: 'Data Privacy Addendum', status: 'Research and Planning', dueDate: 'May 22, 2026', client: 'EuroTech Ltd', owner: 'Partner B', team: 'Privacy', aiContext: 'Standard DPA. Matches previous templates used for EU clients.', workLog: [] },
+    { id: 'c3', title: 'Data Privacy Addendum', status: 'Research and Planning', dueDate: 'May 22, 2026', client: 'EuroTech Ltd', owner: 'Partner B', team: 'Privacy', aiContext: 'Standard DPA. Matches previous templates used for EU clients.', workLog: [], history: [] },
   ],
   'user-3': [],
   'user-4': [],
   waiting: [
-    { id: 'c4', title: 'Response from Opposing Counsel', status: 'Waiting', dueDate: 'May 19, 2026', client: 'Initech LLC', owner: 'Partner A', team: 'IP & Licensing', aiContext: 'Pending their markups on the IP licensing agreement.', workLog: [] },
+    { id: 'c4', title: 'Response from Opposing Counsel', status: 'Waiting', dueDate: 'May 19, 2026', client: 'Initech LLC', owner: 'Partner A', team: 'IP & Licensing', aiContext: 'Pending their markups on the IP licensing agreement.', workLog: [], history: [] },
   ],
   available: [
-    { id: 'c5', title: 'Draft standard Terms of Service', status: 'Not Started', dueDate: null, client: null, owner: null, team: null, aiContext: 'Requested by new startup client.', workLog: [] },
+    { id: 'c5', title: 'Draft standard Terms of Service', status: 'Not Started', dueDate: null, client: null, owner: null, team: null, aiContext: 'Requested by new startup client.', workLog: [], history: [] },
   ],
+  archive: [],
 };
 
 export function findContainer(items, id) {
@@ -58,11 +69,23 @@ export function findCard(items, cardId) {
   return null;
 }
 
+export function requiredColumnFor(status) {
+  return STATUS_TO_COLUMN[status] ?? null;
+}
+
+function isCoupledColumn(column) {
+  return column === 'waiting' || column === 'archive';
+}
+
 export function moveCardAcross(items, { activeId, overId, isBelowOverItem = false }) {
   const activeContainer = findContainer(items, activeId);
   const overContainer = findContainer(items, overId);
 
   if (!activeContainer || !overContainer || activeContainer === overContainer) {
+    return items;
+  }
+
+  if (overContainer === 'archive') {
     return items;
   }
 
@@ -130,4 +153,142 @@ export function appendWorkLogEntry(items, cardId, entry) {
 
   const existing = Array.isArray(card.workLog) ? card.workLog : [];
   return updateCard(items, cardId, { workLog: [...existing, entry] });
+}
+
+export function appendHistoryEvent(items, cardId, event) {
+  const card = findCard(items, cardId);
+  if (!card) return items;
+
+  const existing = Array.isArray(card.history) ? card.history : [];
+  return updateCard(items, cardId, { history: [...existing, event] });
+}
+
+function moveToContainer(items, cardId, toColumn) {
+  const fromColumn = findContainer(items, cardId);
+  if (!fromColumn || fromColumn === toColumn || !(toColumn in items)) {
+    return items;
+  }
+  const card = items[fromColumn].find((c) => c.id === cardId);
+  if (!card) return items;
+  return {
+    ...items,
+    [fromColumn]: items[fromColumn].filter((c) => c.id !== cardId),
+    [toColumn]: [...items[toColumn], card],
+  };
+}
+
+export function setCardStatus(items, cardId, newStatus, { now, destinationColumn } = {}) {
+  const card = findCard(items, cardId);
+  if (!card) return { items, requiresDestination: false };
+
+  const currentColumn = findContainer(items, cardId);
+  const currentStatus = card.status ?? null;
+
+  if (newStatus === currentStatus && !destinationColumn) {
+    return { items, requiresDestination: false };
+  }
+
+  if (currentStatus === 'Done' && newStatus !== 'Done' && !destinationColumn) {
+    return { items, requiresDestination: true };
+  }
+
+  const required = requiredColumnFor(newStatus);
+  const wasCoupled = isCoupledColumn(currentColumn);
+  let targetColumn = currentColumn;
+  const patch = { status: newStatus };
+
+  if (required) {
+    if (currentColumn !== required) {
+      patch.previousColumn = wasCoupled ? card.previousColumn ?? null : currentColumn;
+      patch.previousStatus = wasCoupled ? card.previousStatus ?? null : currentStatus;
+      targetColumn = required;
+    }
+  } else if (wasCoupled) {
+    targetColumn =
+      destinationColumn ?? card.previousColumn ?? 'available';
+    patch.previousColumn = null;
+    patch.previousStatus = null;
+  }
+
+  let next = updateCard(items, cardId, patch);
+
+  if (targetColumn !== currentColumn) {
+    next = moveToContainer(next, cardId, targetColumn);
+  }
+
+  next = appendHistoryEvent(next, cardId, {
+    at: now,
+    kind: 'status',
+    from: currentStatus,
+    to: newStatus,
+  });
+
+  if (targetColumn !== currentColumn) {
+    next = appendHistoryEvent(next, cardId, {
+      at: now,
+      kind: 'column',
+      from: currentColumn,
+      to: targetColumn,
+      reason: 'status',
+    });
+  }
+
+  return { items: next, requiresDestination: false };
+}
+
+export function applyDragLanding(items, cardId, { fromColumn, now }) {
+  const toColumn = findContainer(items, cardId);
+  if (!toColumn || toColumn === fromColumn) return items;
+
+  const card = findCard(items, cardId);
+  if (!card) return items;
+
+  const currentStatus = card.status ?? null;
+  let newStatus = currentStatus;
+  const patch = {};
+
+  if (toColumn === 'waiting') {
+    if (currentStatus !== 'Waiting') {
+      newStatus = 'Waiting';
+      patch.previousColumn = isCoupledColumn(fromColumn) ? null : fromColumn;
+      patch.previousStatus = isCoupledColumn(fromColumn) ? null : currentStatus;
+    }
+  } else if (fromColumn === 'waiting') {
+    newStatus = card.previousStatus ?? DEFAULT_RESTORED_STATUS;
+    patch.previousColumn = null;
+    patch.previousStatus = null;
+  }
+
+  if (newStatus !== currentStatus) {
+    patch.status = newStatus;
+  }
+
+  let next = items;
+  if (Object.keys(patch).length > 0) {
+    next = updateCard(next, cardId, patch);
+  }
+
+  next = appendHistoryEvent(next, cardId, {
+    at: now,
+    kind: 'column',
+    from: fromColumn,
+    to: toColumn,
+    reason: 'drag',
+  });
+
+  if (newStatus !== currentStatus) {
+    next = appendHistoryEvent(next, cardId, {
+      at: now,
+      kind: 'status',
+      from: currentStatus,
+      to: newStatus,
+      reason: 'column',
+    });
+  }
+
+  return next;
+}
+
+export function getArchivedCards(items) {
+  return items.archive ?? [];
 }

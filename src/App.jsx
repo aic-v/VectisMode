@@ -36,16 +36,19 @@ import {
   Building2,
   UserCheck
 } from 'lucide-react';
-import './App.css';
 import {
   CLIENTS,
   COLUMN_TITLES,
   INITIAL_ITEMS,
+  RESTORE_COLUMNS,
   STATUS_KEYS,
   appendWorkLogEntry,
+  applyDragLanding,
   findContainer as findContainerIn,
+  getArchivedCards,
   moveCardAcross,
   reorderWithin,
+  setCardStatus,
   updateCard as updateCardIn,
 } from './board.js';
 
@@ -57,6 +60,13 @@ const STATUS_META = {
   'Waiting': { Icon: Clock },
   'Done': { Icon: CheckCircle2 },
 };
+
+const TEAM_COLUMN_IDS = ['user-1', 'user-2', 'user-3', 'user-4'];
+
+const STATUS_COLUMNS = [
+  { id: 'available', Icon: Inbox },
+  { id: 'waiting', Icon: Clock },
+];
 
 function hasWorkLogContent(entry) {
   if (!entry) return false;
@@ -82,6 +92,21 @@ function formatLoggedAt(iso) {
   });
 }
 
+function describeHistoryEvent(event) {
+  if (!event) return '';
+  if (event.kind === 'status') {
+    const from = event.from ?? 'Not set';
+    const to = event.to ?? 'Not set';
+    return `Status: ${from} → ${to}`;
+  }
+  if (event.kind === 'column') {
+    const from = COLUMN_TITLES[event.from] ?? event.from ?? 'Unknown';
+    const to = COLUMN_TITLES[event.to] ?? event.to ?? 'Unknown';
+    return `Moved: ${from} → ${to}`;
+  }
+  return '';
+}
+
 function CardWidgets({ status, dueDate }) {
   const StatusIcon = (STATUS_META[status] ?? { Icon: Circle }).Icon;
   return (
@@ -104,8 +129,7 @@ function CardWidgets({ status, dueDate }) {
   );
 }
 
-// --- Sortable Card Component ---
-function SortableCard({ id, card, isDraggingOverlay, isProjectingSource, onOpen }) {
+function SortableCard({ id, card, isProjectingSource, onOpen }) {
   const {
     attributes,
     listeners,
@@ -113,21 +137,17 @@ function SortableCard({ id, card, isDraggingOverlay, isProjectingSource, onOpen 
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: id });
+  } = useSortable({ id });
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
   };
 
-  const isOverlay = isDraggingOverlay;
-
   const dragListeners = isProjectingSource ? {} : listeners;
 
   const handleOpen = (event) => {
-    if (isProjectingSource || isDraggingOverlay) {
-      return;
-    }
+    if (isProjectingSource) return;
 
     const sourceCard = event.currentTarget.closest('.card-scene');
     const sourceRect = sourceCard?.getBoundingClientRect();
@@ -150,7 +170,7 @@ function SortableCard({ id, card, isDraggingOverlay, isProjectingSource, onOpen 
       ref={setNodeRef}
       data-card-id={id}
       style={style}
-      className={`card-scene ${isDragging && !isOverlay ? 'dragging-placeholder' : ''} ${isOverlay ? 'dragging' : ''} ${isProjectingSource ? 'projecting-source' : ''}`}
+      className={`card-scene ${isDragging ? 'dragging-placeholder' : ''} ${isProjectingSource ? 'projecting-source' : ''}`}
       {...attributes}
     >
       <div className="card-inner">
@@ -417,7 +437,16 @@ function ProjectedCard({ card, originRect: initialOriginRect, cancelOriginRect, 
   );
 }
 
-function FocusedCardDetails({ card, originRect, onClose, onCardChange }) {
+function FocusedCardDetails({
+  card,
+  originRect,
+  onClose,
+  onCardChange,
+  onStatusChange,
+  pendingStatusChange,
+  onPickRestoreColumn,
+  onCancelPendingStatus,
+}) {
   const [expanded, setExpanded] = useState(false);
   const [target] = useState(getDetailsProjectionTarget);
 
@@ -455,10 +484,16 @@ function FocusedCardDetails({ card, originRect, onClose, onCardChange }) {
   }, [card.id, closeDetails]);
 
   const frame = expanded ? target : originRect;
-  const StatusIcon = (STATUS_META[card.status] ?? { Icon: Inbox }).Icon;
+  const pendingTo = pendingStatusChange?.cardId === card.id ? pendingStatusChange.toStatus : null;
+  const displayedStatus = pendingTo ?? card.status ?? '';
+  const StatusIcon = (STATUS_META[displayedStatus] ?? { Icon: Inbox }).Icon;
 
   const handleField = (field) => (event) => {
     onCardChange(card.id, { [field]: event.target.value });
+  };
+
+  const handleStatusChange = (event) => {
+    onStatusChange(card.id, event.target.value);
   };
 
   return (
@@ -517,11 +552,11 @@ function FocusedCardDetails({ card, originRect, onClose, onCardChange }) {
                 <span>Status</span>
                 <select
                   className="details-meta-input details-meta-select"
-                  value={card.status ?? ''}
-                  onChange={handleField('status')}
+                  value={displayedStatus}
+                  onChange={handleStatusChange}
                 >
                   <option value="">Not set</option>
-                  {Object.keys(STATUS_META).map((status) => (
+                  {STATUS_KEYS.map((status) => (
                     <option key={status} value={status}>
                       {status}
                     </option>
@@ -573,6 +608,34 @@ function FocusedCardDetails({ card, originRect, onClose, onCardChange }) {
             </label>
           </div>
 
+          {pendingTo ? (
+            <div className="details-section restore-picker" role="group" aria-label="Choose a destination column">
+              <div className="details-section-label">Move to…</div>
+              <p className="restore-picker-hint">
+                Change status to <strong>{pendingTo || 'Not set'}</strong>. Pick a column to send this matter back to the active board.
+              </p>
+              <div className="restore-picker-grid">
+                {RESTORE_COLUMNS.map((columnKey) => (
+                  <button
+                    key={columnKey}
+                    type="button"
+                    className="restore-picker-option"
+                    onClick={() => onPickRestoreColumn(card.id, columnKey)}
+                  >
+                    {COLUMN_TITLES[columnKey]}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="restore-picker-cancel"
+                onClick={() => onCancelPendingStatus(card.id)}
+              >
+                Cancel status change
+              </button>
+            </div>
+          ) : null}
+
           <div className="details-section">
             <label className="details-section-label" htmlFor={`description-${card.id}`}>Task description</label>
             <textarea
@@ -607,6 +670,20 @@ function FocusedCardDetails({ card, originRect, onClose, onCardChange }) {
             </div>
           ) : null}
 
+          {Array.isArray(card.history) && card.history.length > 0 ? (
+            <div className="details-section">
+              <div className="details-section-label">History</div>
+              <ul className="history-list">
+                {card.history.map((event, idx) => (
+                  <li key={`${event.at ?? 'na'}-${idx}`} className="history-entry">
+                    <span className="history-entry-time">{formatLoggedAt(event.at)}</span>
+                    <span className="history-entry-text">{describeHistoryEvent(event)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           <div className="details-footer">
             <a
               className="details-footer-link"
@@ -633,7 +710,7 @@ function FocusedCardDetails({ card, originRect, onClose, onCardChange }) {
   );
 }
 
-function ArchiveOverlay({ onClose }) {
+function ArchiveOverlay({ archivedCards, onClose, onCardOpen }) {
   const [expanded, setExpanded] = useState(false);
   const [target] = useState(getDetailsProjectionTarget);
 
@@ -662,6 +739,19 @@ function ArchiveOverlay({ onClose }) {
     ? target
     : { top: window.innerHeight - 80, left: window.innerWidth - 200, width: 160, height: 40 };
 
+  const handleArchivedCardClick = (cardId) => (event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    closeOverlay();
+    window.setTimeout(() => {
+      onCardOpen(cardId, {
+        top: rect.top,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height,
+      });
+    }, 500);
+  };
+
   return (
     <div className={`projection-layer ${expanded ? 'is-open' : ''}`}>
       <button
@@ -687,17 +777,36 @@ function ArchiveOverlay({ onClose }) {
             </button>
           </div>
 
-          <div className="details-section archive-empty">
-            <div className="details-section-label">No archived matters yet</div>
-            <p>Matters set to status <strong>Done</strong> will appear here. Archive view is a placeholder — see roadmap.</p>
-          </div>
+          {archivedCards.length === 0 ? (
+            <div className="details-section archive-empty">
+              <div className="details-section-label">No archived matters yet</div>
+              <p>Matters set to status <strong>Done</strong> appear here. Open one and change its status to send it back to the active board.</p>
+            </div>
+          ) : (
+            <div className="details-section">
+              <div className="details-section-label">{archivedCards.length} archived</div>
+              <ul className="archive-list">
+                {archivedCards.map((card) => (
+                  <li key={card.id}>
+                    <button
+                      type="button"
+                      className="archive-list-item"
+                      onClick={handleArchivedCardClick(card.id)}
+                    >
+                      <span className="archive-list-item-title">{card.title}</span>
+                      {card.client ? <span className="archive-list-item-subtitle">{card.client}</span> : null}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </section>
     </div>
   );
 }
 
-// --- Card Component for Overlay ---
 function CardOverlay({ card }) {
   return (
     <div className="card-scene dragging">
@@ -717,11 +826,8 @@ function CardOverlay({ card }) {
   );
 }
 
-// --- Droppable Container ---
 function Container({ id, title, icon, items, count, projectedCardId, onCardOpen }) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: id,
-  });
+  const { setNodeRef, isOver } = useDroppable({ id });
 
   return (
     <div className={`cutout-panel ${isOver ? 'is-over' : ''}`} ref={setNodeRef}>
@@ -759,13 +865,13 @@ export default function App() {
   const suppressCardOpenUntilRef = useRef(0);
   const preDragItemsRef = useRef(null);
   const preDragRectRef = useRef(null);
-  
-  // Track origin container and projected editor state
+
   const [draggedFromContainer, setDraggedFromContainer] = useState(null);
   const [projectedCard, setProjectedCard] = useState(null);
   const [focusedCard, setFocusedCard] = useState(null);
   const [isArchiveOpen, setIsArchiveOpen] = useState(false);
-  
+  const [pendingStatusChange, setPendingStatusChange] = useState(null);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -841,12 +947,16 @@ export default function App() {
       }
     };
 
-    if (!activeContainer || !overContainer || activeContainer !== overContainer) {
-      finishDrag();
-      return;
-    }
+    const crossedContainers =
+      activeContainer && draggedFromContainer && activeContainer !== draggedFromContainer;
 
-    setItems((prev) => reorderWithin(prev, { activeId: active.id, overId: over?.id }));
+    if (crossedContainers) {
+      const fromColumn = draggedFromContainer;
+      const now = new Date().toISOString();
+      setItems((prev) => applyDragLanding(prev, active.id, { fromColumn, now }));
+    } else if (activeContainer && overContainer && activeContainer === overContainer) {
+      setItems((prev) => reorderWithin(prev, { activeId: active.id, overId: over?.id }));
+    }
 
     finishDrag();
   };
@@ -857,6 +967,40 @@ export default function App() {
 
   const addWorkLogEntry = useCallback((cardId, entry) => {
     setItems((prev) => appendWorkLogEntry(prev, cardId, entry));
+  }, []);
+
+  const applyStatusChange = useCallback((cardId, newStatus, destinationColumn) => {
+    const now = new Date().toISOString();
+    let result;
+    setItems((prev) => {
+      result = setCardStatus(prev, cardId, newStatus, { now, destinationColumn });
+      return result.items;
+    });
+    if (result?.requiresDestination) {
+      setPendingStatusChange({ cardId, toStatus: newStatus });
+      return { requiresDestination: true };
+    }
+    setPendingStatusChange((current) => (current?.cardId === cardId ? null : current));
+    return { requiresDestination: false };
+  }, []);
+
+  const handleStatusChange = useCallback((cardId, newStatus) => {
+    applyStatusChange(cardId, newStatus);
+  }, [applyStatusChange]);
+
+  const handlePickRestoreColumn = useCallback((cardId, destinationColumn) => {
+    const pending = pendingStatusChange;
+    if (!pending || pending.cardId !== cardId) return;
+    applyStatusChange(cardId, pending.toStatus, destinationColumn);
+  }, [applyStatusChange, pendingStatusChange]);
+
+  const cancelPendingStatus = useCallback((cardId) => {
+    setPendingStatusChange((current) => (current?.cardId === cardId ? null : current));
+  }, []);
+
+  const closeFocusedCard = useCallback(() => {
+    setFocusedCard(null);
+    setPendingStatusChange(null);
   }, []);
 
   const handleCardOpen = (cardId, originRect) => {
@@ -871,15 +1015,15 @@ export default function App() {
     });
   };
 
-  const activeCard = activeId
-    ? Object.values(items).flat().find((i) => i.id === activeId)
-    : null;
+  const allCards = Object.values(items).flat();
+  const activeCard = activeId ? allCards.find((i) => i.id === activeId) : null;
   const projectedCardData = projectedCard
-    ? Object.values(items).flat().find((i) => i.id === projectedCard.id)
+    ? allCards.find((i) => i.id === projectedCard.id)
     : null;
   const focusedCardData = focusedCard
-    ? Object.values(items).flat().find((i) => i.id === focusedCard.id)
+    ? allCards.find((i) => i.id === focusedCard.id)
     : null;
+  const overlayCardId = projectedCard?.id ?? focusedCard?.id;
 
   return (
     <div className="dashboard-container">
@@ -925,15 +1069,33 @@ export default function App() {
         onDragEnd={handleDragEnd}
       >
         <div className="board-grid">
-          <Container id="user-1" title={COLUMN_TITLES['user-1']} icon={<User size={18}/>} items={items['user-1']} count={items['user-1'].length} projectedCardId={projectedCard?.id ?? focusedCard?.id} onCardOpen={handleCardOpen} />
-          <Container id="user-2" title={COLUMN_TITLES['user-2']} icon={<User size={18}/>} items={items['user-2']} count={items['user-2'].length} projectedCardId={projectedCard?.id ?? focusedCard?.id} onCardOpen={handleCardOpen} />
-          <Container id="user-3" title={COLUMN_TITLES['user-3']} icon={<User size={18}/>} items={items['user-3']} count={items['user-3'].length} projectedCardId={projectedCard?.id ?? focusedCard?.id} onCardOpen={handleCardOpen} />
-          <Container id="user-4" title={COLUMN_TITLES['user-4']} icon={<User size={18}/>} items={items['user-4']} count={items['user-4'].length} projectedCardId={projectedCard?.id ?? focusedCard?.id} onCardOpen={handleCardOpen} />
+          {TEAM_COLUMN_IDS.map((columnId) => (
+            <Container
+              key={columnId}
+              id={columnId}
+              title={COLUMN_TITLES[columnId]}
+              icon={<User size={18} />}
+              items={items[columnId]}
+              count={items[columnId].length}
+              projectedCardId={overlayCardId}
+              onCardOpen={handleCardOpen}
+            />
+          ))}
         </div>
 
         <div className="status-grid">
-          <Container id="available" title={COLUMN_TITLES.available} icon={<Inbox size={18}/>} items={items['available']} count={items['available'].length} projectedCardId={projectedCard?.id ?? focusedCard?.id} onCardOpen={handleCardOpen} />
-          <Container id="waiting" title={COLUMN_TITLES.waiting} icon={<Clock size={18}/>} items={items['waiting']} count={items['waiting'].length} projectedCardId={projectedCard?.id ?? focusedCard?.id} onCardOpen={handleCardOpen} />
+          {STATUS_COLUMNS.map(({ id, Icon }) => (
+            <Container
+              key={id}
+              id={id}
+              title={COLUMN_TITLES[id]}
+              icon={<Icon size={18} />}
+              items={items[id]}
+              count={items[id].length}
+              projectedCardId={overlayCardId}
+              onCardOpen={handleCardOpen}
+            />
+          ))}
         </div>
 
         <DragOverlay>
@@ -948,7 +1110,7 @@ export default function App() {
           cancelOriginRect={projectedCard.cancelOriginRect}
           onSave={(payload) => {
             if (payload?.status && payload.status !== projectedCardData.status) {
-              updateCard(projectedCard.id, { status: payload.status });
+              applyStatusChange(projectedCard.id, payload.status);
             }
             if (payload?.entry && hasWorkLogContent(payload.entry)) {
               addWorkLogEntry(projectedCard.id, payload.entry);
@@ -974,13 +1136,21 @@ export default function App() {
         <FocusedCardDetails
           card={focusedCardData}
           originRect={focusedCard.originRect}
-          onClose={() => setFocusedCard(null)}
+          onClose={closeFocusedCard}
           onCardChange={updateCard}
+          onStatusChange={handleStatusChange}
+          pendingStatusChange={pendingStatusChange}
+          onPickRestoreColumn={handlePickRestoreColumn}
+          onCancelPendingStatus={cancelPendingStatus}
         />
       ) : null}
 
       {isArchiveOpen ? (
-        <ArchiveOverlay onClose={() => setIsArchiveOpen(false)} />
+        <ArchiveOverlay
+          archivedCards={getArchivedCards(items)}
+          onClose={() => setIsArchiveOpen(false)}
+          onCardOpen={handleCardOpen}
+        />
       ) : null}
     </div>
   );
