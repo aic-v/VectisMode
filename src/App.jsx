@@ -10,7 +10,6 @@ import {
   useDroppable
 } from '@dnd-kit/core';
 import {
-  arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
@@ -38,6 +37,17 @@ import {
   UserCheck
 } from 'lucide-react';
 import './App.css';
+import {
+  CLIENTS,
+  COLUMN_TITLES,
+  INITIAL_ITEMS,
+  STATUS_KEYS,
+  appendWorkLogEntry,
+  findContainer as findContainerIn,
+  moveCardAcross,
+  reorderWithin,
+  updateCard as updateCardIn,
+} from './board.js';
 
 const STATUS_META = {
   'Not Started': { Icon: Circle },
@@ -48,14 +58,29 @@ const STATUS_META = {
   'Done': { Icon: CheckCircle2 },
 };
 
-const CLIENTS = [
-  'Acme Corp',
-  'EuroTech Ltd',
-  'Initech LLC',
-  'Globex Industries',
-  'Vandelay Imports',
-  'Internal',
-];
+function hasWorkLogContent(entry) {
+  if (!entry) return false;
+  return Boolean(
+    entry.description ||
+    entry.nextSteps ||
+    entry.startDate ||
+    entry.endDate ||
+    (entry.hours !== null && entry.hours !== undefined && !Number.isNaN(entry.hours)),
+  );
+}
+
+function formatLoggedAt(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
 
 function CardWidgets({ status, dueDate }) {
   const StatusIcon = (STATUS_META[status] ?? { Icon: Circle }).Icon;
@@ -144,8 +169,20 @@ function SortableCard({ id, card, isDraggingOverlay, isProjectingSource, onOpen 
   );
 }
 
-function WorkLogForm({ cardTitle, cardStatus, onSave, onCancel }) {
+function WorkLogForm({ cardId, cardTitle, cardStatus, onSave, onCancel }) {
   const [status, setStatus] = useState(cardStatus ?? '');
+  const [description, setDescription] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [hours, setHours] = useState('');
+  const [nextSteps, setNextSteps] = useState('');
+
+  const descriptionId = `worklog-description-${cardId}`;
+  const startDateId = `worklog-start-${cardId}`;
+  const endDateId = `worklog-end-${cardId}`;
+  const hoursId = `worklog-hours-${cardId}`;
+  const nextStepsId = `worklog-next-${cardId}`;
+  const statusId = `worklog-status-${cardId}`;
 
   return (
     <div
@@ -174,43 +211,77 @@ function WorkLogForm({ cardTitle, cardStatus, onSave, onCancel }) {
       </div>
 
       <div className="form-group">
-        <label className="details-section-label">Status</label>
+        <label className="details-section-label" htmlFor={statusId}>Status</label>
         <select
+          id={statusId}
           className="form-input"
           value={status}
           onChange={(e) => setStatus(e.target.value)}
         >
           <option value="">Not set</option>
-          {Object.keys(STATUS_META).map((s) => (
+          {STATUS_KEYS.map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
       </div>
 
       <div className="form-group">
-        <label className="details-section-label">Description of work completed</label>
-        <textarea className="form-textarea" placeholder="E.g., Reviewed standard MSA clauses..."></textarea>
+        <label className="details-section-label" htmlFor={descriptionId}>Description of work completed</label>
+        <textarea
+          id={descriptionId}
+          className="form-textarea"
+          placeholder="E.g., Reviewed standard MSA clauses..."
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
       </div>
 
       <div className="form-row">
         <div className="form-group">
-          <label className="details-section-label">Start date</label>
-          <input type="date" className="form-input" />
+          <label className="details-section-label" htmlFor={startDateId}>Start date</label>
+          <input
+            id={startDateId}
+            type="date"
+            className="form-input"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+          />
         </div>
         <div className="form-group">
-          <label className="details-section-label">End date</label>
-          <input type="date" className="form-input" />
+          <label className="details-section-label" htmlFor={endDateId}>End date</label>
+          <input
+            id={endDateId}
+            type="date"
+            className="form-input"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+          />
         </div>
       </div>
 
       <div className="form-group">
-        <label className="details-section-label">Est. time spent (hrs)</label>
-        <input type="number" step="0.5" className="form-input" placeholder="1.5" />
+        <label className="details-section-label" htmlFor={hoursId}>Est. time spent (hrs)</label>
+        <input
+          id={hoursId}
+          type="number"
+          step="0.5"
+          className="form-input"
+          placeholder="1.5"
+          value={hours}
+          onChange={(e) => setHours(e.target.value)}
+        />
       </div>
 
       <div className="form-group">
-        <label className="details-section-label">Next steps</label>
-        <textarea className="form-textarea" placeholder="1. Send revised draft to counterparty&#10;2. Follow up on liability cap..." style={{ minHeight: '80px' }}></textarea>
+        <label className="details-section-label" htmlFor={nextStepsId}>Next steps</label>
+        <textarea
+          id={nextStepsId}
+          className="form-textarea"
+          placeholder="1. Send revised draft to counterparty&#10;2. Follow up on liability cap..."
+          style={{ minHeight: '80px' }}
+          value={nextSteps}
+          onChange={(e) => setNextSteps(e.target.value)}
+        />
       </div>
 
       {onSave ? (
@@ -218,7 +289,18 @@ function WorkLogForm({ cardTitle, cardStatus, onSave, onCancel }) {
           className="btn-primary"
           onClick={(e) => {
             e.stopPropagation();
-            onSave({ status });
+            onSave({
+              status,
+              entry: {
+                description: description.trim(),
+                startDate: startDate || null,
+                endDate: endDate || null,
+                hours: hours === '' ? null : Number(hours),
+                nextSteps: nextSteps.trim(),
+                status,
+                loggedAt: new Date().toISOString(),
+              },
+            });
           }}
         >
           Save &amp; Complete
@@ -322,6 +404,7 @@ function ProjectedCard({ card, originRect: initialOriginRect, cancelOriginRect, 
 
           <div className="projected-card-face projected-card-back">
             <WorkLogForm
+              cardId={card.id}
               cardTitle={card.title}
               cardStatus={card.status}
               onSave={handleSave}
@@ -501,6 +584,29 @@ function FocusedCardDetails({ card, originRect, onClose, onCardChange }) {
             />
           </div>
 
+          {Array.isArray(card.workLog) && card.workLog.length > 0 ? (
+            <div className="details-section">
+              <div className="details-section-label">Work log</div>
+              <ul className="work-log-list">
+                {card.workLog.map((entry, idx) => (
+                  <li key={entry.loggedAt ?? idx} className="work-log-entry">
+                    <div className="work-log-entry-meta">
+                      <span>{formatLoggedAt(entry.loggedAt)}</span>
+                      {entry.hours != null ? <span>{entry.hours} hrs</span> : null}
+                      {entry.status ? <span>{entry.status}</span> : null}
+                    </div>
+                    {entry.description ? <p className="work-log-entry-description">{entry.description}</p> : null}
+                    {entry.nextSteps ? (
+                      <p className="work-log-entry-next">
+                        <strong>Next: </strong>{entry.nextSteps}
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           <div className="details-footer">
             <a
               className="details-footer-link"
@@ -645,33 +751,6 @@ function Container({ id, title, icon, items, count, projectedCardId, onCardOpen 
   );
 }
 
-const INITIAL_ITEMS = {
-  'user-1': [
-    { id: 'c1', title: 'Review MSA for Acme Corp', status: 'Reviewing', dueDate: 'May 25, 2026', client: 'Acme Corp', owner: 'Partner A', team: 'Commercial', aiContext: 'Draft contains standard indemnity clauses. Requires specific review of liability cap.' },
-    { id: 'c2', title: 'Draft Employee Handbook', status: 'Drafting', dueDate: 'Jun 04, 2026', client: 'Internal', owner: 'Partner A', team: 'Employment', aiContext: 'Needs alignment with new remote work policies.' }
-  ],
-  'user-2': [
-    { id: 'c3', title: 'Data Privacy Addendum', status: 'Research and Planning', dueDate: 'May 22, 2026', client: 'EuroTech Ltd', owner: 'Partner B', team: 'Privacy', aiContext: 'Standard DPA. Matches previous templates used for EU clients.' }
-  ],
-  'user-3': [],
-  'user-4': [],
-  'waiting': [
-    { id: 'c4', title: 'Response from Opposing Counsel', status: 'Waiting', dueDate: 'May 19, 2026', client: 'Initech LLC', owner: 'Partner A', team: 'IP & Licensing', aiContext: 'Pending their markups on the IP licensing agreement.' }
-  ],
-  'available': [
-    { id: 'c5', title: 'Draft standard Terms of Service', status: 'Not Started', dueDate: null, client: null, owner: null, team: null, aiContext: 'Requested by new startup client.' }
-  ]
-};
-
-const COLUMN_TITLES = {
-  'user-1': 'Partner A',
-  'user-2': 'Partner B',
-  'user-3': 'Associate 1',
-  'user-4': 'Associate 2',
-  waiting: 'Waiting Response',
-  available: 'Available',
-};
-
 export default function App() {
   const [items, setItems] = useState(INITIAL_ITEMS);
   const [activeId, setActiveId] = useState(null);
@@ -692,14 +771,7 @@ export default function App() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  const findContainer = (id) => {
-    if (id in items) {
-      return id;
-    }
-    return Object.keys(items).find((key) =>
-      items[key].find((item) => item.id === id)
-    );
-  };
+  const findContainer = useCallback((id) => findContainerIn(items, id), [items]);
 
   const handleDragStart = (event) => {
     const { active } = event;
@@ -724,43 +796,16 @@ export default function App() {
   const handleDragOver = (event) => {
     const { active, over } = event;
     const overId = over?.id;
+    if (!overId || active.id === overId) return;
 
-    if (!overId || active.id === overId) {
-      return;
-    }
+    const translated = active.rect.current.translated;
+    const isBelowOverItem = !!(over && translated && translated.top > over.rect.top + over.rect.height);
 
-    const activeContainer = findContainer(active.id);
-    const overContainer = findContainer(overId);
-
-    if (!activeContainer || !overContainer || activeContainer === overContainer) {
-      return;
-    }
-
-    setItems((prev) => {
-      const activeItems = prev[activeContainer];
-      const overItems = prev[overContainer];
-      const activeIndex = activeItems.findIndex((i) => i.id === active.id);
-      const overIndex = overItems.findIndex((i) => i.id === overId);
-
-      let newIndex;
-      if (overId in prev) {
-        newIndex = overItems.length + 1;
-      } else {
-        const isBelowOverItem = over && active.rect.current.translated && active.rect.current.translated.top > over.rect.top + over.rect.height;
-        const modifier = isBelowOverItem ? 1 : 0;
-        newIndex = overIndex >= 0 ? overIndex + modifier : overItems.length + 1;
-      }
-
-      return {
-        ...prev,
-        [activeContainer]: [...prev[activeContainer].filter((item) => item.id !== active.id)],
-        [overContainer]: [
-          ...prev[overContainer].slice(0, newIndex),
-          activeItems[activeIndex],
-          ...prev[overContainer].slice(newIndex, prev[overContainer].length),
-        ],
-      };
-    });
+    setItems((prev) => moveCardAcross(prev, {
+      activeId: active.id,
+      overId,
+      isBelowOverItem,
+    }));
   };
 
   const handleDragEnd = (event) => {
@@ -801,33 +846,17 @@ export default function App() {
       return;
     }
 
-    const activeIndex = items[activeContainer].findIndex((i) => i.id === active.id);
-    const overIndex = items[overContainer].findIndex((i) => i.id === over?.id);
-
-    // Only arrayMove if overIndex is valid (not -1, which happens when dropped on an empty container)
-    if (activeIndex !== overIndex && overIndex !== -1) {
-      setItems((items) => ({
-        ...items,
-        [overContainer]: arrayMove(items[overContainer], activeIndex, overIndex),
-      }));
-    }
+    setItems((prev) => reorderWithin(prev, { activeId: active.id, overId: over?.id }));
 
     finishDrag();
   };
 
   const updateCard = useCallback((cardId, patch) => {
-    setItems((prev) => {
-      const container = Object.keys(prev).find((key) =>
-        prev[key].some((c) => c.id === cardId),
-      );
-      if (!container) return prev;
-      return {
-        ...prev,
-        [container]: prev[container].map((c) =>
-          c.id === cardId ? { ...c, ...patch } : c,
-        ),
-      };
-    });
+    setItems((prev) => updateCardIn(prev, cardId, patch));
+  }, []);
+
+  const addWorkLogEntry = useCallback((cardId, entry) => {
+    setItems((prev) => appendWorkLogEntry(prev, cardId, entry));
   }, []);
 
   const handleCardOpen = (cardId, originRect) => {
@@ -920,6 +949,9 @@ export default function App() {
           onSave={(payload) => {
             if (payload?.status && payload.status !== projectedCardData.status) {
               updateCard(projectedCard.id, { status: payload.status });
+            }
+            if (payload?.entry && hasWorkLogContent(payload.entry)) {
+              addWorkLogEntry(projectedCard.id, payload.entry);
             }
             preDragItemsRef.current = null;
             preDragRectRef.current = null;
