@@ -34,23 +34,30 @@ import {
   Eye,
   CheckCircle2,
   Building2,
-  UserCheck
+  UserCheck,
+  AlertTriangle
 } from 'lucide-react';
 import {
   CLIENTS,
   COLUMN_TITLES,
   INITIAL_ITEMS,
   RESTORE_COLUMNS,
+  STATUS_CHECK_THRESHOLD_DAYS,
   STATUS_KEYS,
   appendWorkLogEntry,
   applyDragLanding,
+  applyStatusChecks,
   findContainer as findContainerIn,
   getArchivedCards,
+  getStatusCheckCards,
   moveCardAcross,
   reorderWithin,
+  resolveStatusCheck,
   setCardStatus,
   updateCard as updateCardIn,
 } from './board.js';
+import { IDENTITY_STORAGE_KEY, loadBoard, loadJSON, saveBoard, saveJSON } from './storage.js';
+import MyCommandCentre from './MyCommandCentre.jsx';
 
 const STATUS_META = {
   'Not Started': { Icon: Circle },
@@ -58,6 +65,7 @@ const STATUS_META = {
   'Drafting': { Icon: Pencil },
   'Reviewing': { Icon: Eye },
   'Waiting': { Icon: Clock },
+  'Status Check': { Icon: AlertTriangle },
   'Done': { Icon: CheckCircle2 },
 };
 
@@ -174,7 +182,11 @@ function SortableCard({ id, card, isProjectingSource, onOpen }) {
       {...attributes}
     >
       <div className="card-inner">
-        <div className="card-front" {...dragListeners} onClick={handleOpen}>
+        <div
+          className={`card-front ${card.status === 'Status Check' ? 'card-front--alert' : ''}`}
+          {...dragListeners}
+          onClick={handleOpen}
+        >
           <div className="card-drag-handle">
             <GripVertical size={16} />
           </div>
@@ -437,6 +449,78 @@ function ProjectedCard({ card, originRect: initialOriginRect, cancelOriginRect, 
   );
 }
 
+function daysBetween(fromIso, toIso) {
+  if (!fromIso || !toIso) return null;
+  const from = new Date(fromIso).getTime();
+  const to = new Date(toIso).getTime();
+  if (Number.isNaN(from) || Number.isNaN(to)) return null;
+  return Math.floor((to - from) / (24 * 60 * 60 * 1000));
+}
+
+function DetailsFooterLink({ href, Icon, label }) {
+  const isReal = typeof href === 'string' && href.startsWith('http');
+  return (
+    <a
+      className="details-footer-link"
+      href={isReal ? href : '#'}
+      target={isReal ? '_blank' : undefined}
+      rel={isReal ? 'noreferrer' : undefined}
+      onClick={isReal ? undefined : (event) => event.preventDefault()}
+    >
+      <Icon size={16} />
+      {label}
+      <ExternalLink size={13} />
+    </a>
+  );
+}
+
+const ASSIGN_COLUMNS = RESTORE_COLUMNS.filter((column) => column !== 'waiting');
+
+function StatusCheckPanel({ card, onResolve }) {
+  const waitedDays = daysBetween(card.waitingSince, card.statusCheckAt);
+  return (
+    <div className="details-section status-check-panel" role="group" aria-label="Status check">
+      <div className="details-section-label status-check-panel-label">
+        <AlertTriangle size={13} />
+        Status check
+      </div>
+      <p className="status-check-panel-hint">
+        This matter has been in <strong>Waiting Response</strong> for{' '}
+        {waitedDays != null ? `${waitedDays} days` : `over ${STATUS_CHECK_THRESHOLD_DAYS} days`}.
+        Reassign it, keep waiting, or archive it.
+      </p>
+      <div className="restore-picker-grid">
+        {ASSIGN_COLUMNS.map((columnKey) => (
+          <button
+            key={columnKey}
+            type="button"
+            className="restore-picker-option"
+            onClick={() => onResolve(card.id, 'assign', columnKey)}
+          >
+            Assign to {COLUMN_TITLES[columnKey]}
+          </button>
+        ))}
+      </div>
+      <div className="status-check-panel-actions">
+        <button
+          type="button"
+          className="restore-picker-option"
+          onClick={() => onResolve(card.id, 'keep-waiting')}
+        >
+          Keep waiting ({STATUS_CHECK_THRESHOLD_DAYS}-day clock restarts)
+        </button>
+        <button
+          type="button"
+          className="restore-picker-option status-check-archive"
+          onClick={() => onResolve(card.id, 'archive')}
+        >
+          Archive matter
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function FocusedCardDetails({
   card,
   originRect,
@@ -446,6 +530,7 @@ function FocusedCardDetails({
   pendingStatusChange,
   onPickRestoreColumn,
   onCancelPendingStatus,
+  onResolveStatusCheck,
 }) {
   const [expanded, setExpanded] = useState(false);
   const [target] = useState(getDetailsProjectionTarget);
@@ -608,6 +693,10 @@ function FocusedCardDetails({
             </label>
           </div>
 
+          {card.status === 'Status Check' && !pendingTo ? (
+            <StatusCheckPanel card={card} onResolve={onResolveStatusCheck} />
+          ) : null}
+
           {pendingTo ? (
             <div className="details-section restore-picker" role="group" aria-label="Choose a destination column">
               <div className="details-section-label">Move to…</div>
@@ -685,24 +774,8 @@ function FocusedCardDetails({
           ) : null}
 
           <div className="details-footer">
-            <a
-              className="details-footer-link"
-              href={card.timeEntriesUrl ?? '#'}
-              onClick={(event) => event.preventDefault()}
-            >
-              <Timer size={16} />
-              Time entries
-              <ExternalLink size={13} />
-            </a>
-            <a
-              className="details-footer-link"
-              href={card.taskFolderUrl ?? '#'}
-              onClick={(event) => event.preventDefault()}
-            >
-              <FolderOpen size={16} />
-              Task folder
-              <ExternalLink size={13} />
-            </a>
+            <DetailsFooterLink href={card.timeEntriesUrl} Icon={Timer} label="Time entries" />
+            <DetailsFooterLink href={card.taskFolderUrl} Icon={FolderOpen} label="Task folder" />
           </div>
         </div>
       </section>
@@ -826,6 +899,26 @@ function CardOverlay({ card }) {
   );
 }
 
+function StatusCheckBannerItem({ card, onOpen }) {
+  return (
+    <button
+      type="button"
+      className="status-check-banner-item"
+      onClick={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        onOpen(card.id, {
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+          height: rect.height,
+        });
+      }}
+    >
+      {card.title}
+    </button>
+  );
+}
+
 function Container({ id, title, icon, items, count, projectedCardId, onCardOpen }) {
   const { setNodeRef, isOver } = useDroppable({ id });
 
@@ -858,13 +951,33 @@ function Container({ id, title, icon, items, count, projectedCardId, onCardOpen 
 }
 
 export default function App() {
-  const [items, setItems] = useState(INITIAL_ITEMS);
+  const [items, setItems] = useState(() => loadBoard() ?? INITIAL_ITEMS);
   const [activeId, setActiveId] = useState(null);
   const flipTimerRef = useRef(null);
   const [commandMode, setCommandMode] = useState('team');
+  const [memberId, setMemberId] = useState(() => loadJSON(IDENTITY_STORAGE_KEY) ?? 'user-1');
   const suppressCardOpenUntilRef = useRef(0);
   const preDragItemsRef = useRef(null);
   const preDragRectRef = useRef(null);
+
+  useEffect(() => {
+    saveBoard(items);
+  }, [items]);
+
+  useEffect(() => {
+    saveJSON(IDENTITY_STORAGE_KEY, memberId);
+  }, [memberId]);
+
+  // Waiting-Response watchdog: flag cards that have sat in Waiting for the
+  // threshold as Status Check, on load and then once a minute.
+  useEffect(() => {
+    const sweep = () => {
+      setItems((prev) => applyStatusChecks(prev, { now: new Date().toISOString() }).items);
+    };
+    sweep();
+    const timer = window.setInterval(sweep, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const [draggedFromContainer, setDraggedFromContainer] = useState(null);
   const [projectedCard, setProjectedCard] = useState(null);
@@ -998,6 +1111,11 @@ export default function App() {
     setPendingStatusChange((current) => (current?.cardId === cardId ? null : current));
   }, []);
 
+  const handleResolveStatusCheck = useCallback((cardId, action, destinationColumn) => {
+    const now = new Date().toISOString();
+    setItems((prev) => resolveStatusCheck(prev, cardId, { action, destinationColumn, now }));
+  }, []);
+
   const closeFocusedCard = useCallback(() => {
     setFocusedCard(null);
     setPendingStatusChange(null);
@@ -1024,6 +1142,7 @@ export default function App() {
     ? allCards.find((i) => i.id === focusedCard.id)
     : null;
   const overlayCardId = projectedCard?.id ?? focusedCard?.id;
+  const statusCheckCards = getStatusCheckCards(items);
 
   return (
     <div className="dashboard-container">
@@ -1061,47 +1180,70 @@ export default function App() {
         </button>
       </div>
 
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCorners}
-        onDragStart={handleDragStart}
-        onDragOver={handleDragOver}
-        onDragEnd={handleDragEnd}
-      >
-        <div className="board-grid">
-          {TEAM_COLUMN_IDS.map((columnId) => (
-            <Container
-              key={columnId}
-              id={columnId}
-              title={COLUMN_TITLES[columnId]}
-              icon={<User size={18} />}
-              items={items[columnId]}
-              count={items[columnId].length}
-              projectedCardId={overlayCardId}
-              onCardOpen={handleCardOpen}
-            />
+      {commandMode === 'team' && statusCheckCards.length > 0 ? (
+        <div className="status-check-banner" role="status">
+          <AlertTriangle size={15} />
+          <span>
+            {statusCheckCards.length === 1
+              ? '1 matter needs a status check'
+              : `${statusCheckCards.length} matters need a status check`}
+          </span>
+          {statusCheckCards.map((card) => (
+            <StatusCheckBannerItem key={card.id} card={card} onOpen={handleCardOpen} />
           ))}
         </div>
+      ) : null}
 
-        <div className="status-grid">
-          {STATUS_COLUMNS.map(({ id, Icon }) => (
-            <Container
-              key={id}
-              id={id}
-              title={COLUMN_TITLES[id]}
-              icon={<Icon size={18} />}
-              items={items[id]}
-              count={items[id].length}
-              projectedCardId={overlayCardId}
-              onCardOpen={handleCardOpen}
-            />
-          ))}
-        </div>
+      {commandMode === 'team' ? (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCorners}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+        >
+          <div className="board-grid">
+            {TEAM_COLUMN_IDS.map((columnId) => (
+              <Container
+                key={columnId}
+                id={columnId}
+                title={COLUMN_TITLES[columnId]}
+                icon={<User size={18} />}
+                items={items[columnId]}
+                count={items[columnId].length}
+                projectedCardId={overlayCardId}
+                onCardOpen={handleCardOpen}
+              />
+            ))}
+          </div>
 
-        <DragOverlay>
-          {activeId && activeCard ? <CardOverlay card={activeCard} /> : null}
-        </DragOverlay>
-      </DndContext>
+          <div className="status-grid">
+            {STATUS_COLUMNS.map(({ id, Icon }) => (
+              <Container
+                key={id}
+                id={id}
+                title={COLUMN_TITLES[id]}
+                icon={<Icon size={18} />}
+                items={items[id]}
+                count={items[id].length}
+                projectedCardId={overlayCardId}
+                onCardOpen={handleCardOpen}
+              />
+            ))}
+          </div>
+
+          <DragOverlay>
+            {activeId && activeCard ? <CardOverlay card={activeCard} /> : null}
+          </DragOverlay>
+        </DndContext>
+      ) : (
+        <MyCommandCentre
+          items={items}
+          memberId={memberId}
+          onMemberChange={setMemberId}
+          onCardOpen={handleCardOpen}
+        />
+      )}
 
       {projectedCard && projectedCardData ? (
         <ProjectedCard
@@ -1142,6 +1284,7 @@ export default function App() {
           pendingStatusChange={pendingStatusChange}
           onPickRestoreColumn={handlePickRestoreColumn}
           onCancelPendingStatus={cancelPendingStatus}
+          onResolveStatusCheck={handleResolveStatusCheck}
         />
       ) : null}
 
