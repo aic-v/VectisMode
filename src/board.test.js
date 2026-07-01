@@ -3,12 +3,16 @@ import {
   appendHistoryEvent,
   appendWorkLogEntry,
   applyDragLanding,
+  applyStatusChecks,
   findCard,
   findContainer,
   getArchivedCards,
+  getStatusCheckCards,
+  getStatusCheckDueCards,
   moveCardAcross,
   reorderWithin,
   requiredColumnFor,
+  resolveStatusCheck,
   setCardStatus,
   updateCard,
 } from './board.js';
@@ -317,5 +321,185 @@ describe('getArchivedCards', () => {
 
   it('returns an empty array when archive is missing', () => {
     expect(getArchivedCards({})).toEqual([]);
+  });
+});
+
+describe('setCardStatus — Done restoration edge cases', () => {
+  it('requires a destination when the provided destination column is unknown', () => {
+    const board = makeBoard();
+    const { items, requiresDestination } = setCardStatus(board, 'c7', 'Drafting', {
+      now: NOW,
+      destinationColumn: 'user-99',
+    });
+    expect(requiresDestination).toBe(true);
+    expect(items).toBe(board);
+  });
+
+  it('requires a destination when the provided destination is the archive itself', () => {
+    const board = makeBoard();
+    const { items, requiresDestination } = setCardStatus(board, 'c7', 'Drafting', {
+      now: NOW,
+      destinationColumn: 'archive',
+    });
+    expect(requiresDestination).toBe(true);
+    expect(items).toBe(board);
+  });
+});
+
+describe('work log ordering', () => {
+  it('appends multiple entries in call order', () => {
+    let board = makeBoard();
+    board = appendWorkLogEntry(board, 'c1', { description: 'first', loggedAt: 'a' });
+    board = appendWorkLogEntry(board, 'c1', { description: 'second', loggedAt: 'b' });
+    board = appendWorkLogEntry(board, 'c1', { description: 'third', loggedAt: 'c' });
+    expect(board['user-1'][0].workLog.map((e) => e.description)).toEqual([
+      'first',
+      'second',
+      'third',
+    ]);
+  });
+});
+
+describe('history ordering across mixed transitions', () => {
+  it('interleaves status and column events in the order they happened', () => {
+    let board = makeBoard();
+    board = setCardStatus(board, 'c1', 'Drafting', { now: '1' }).items;
+    board = setCardStatus(board, 'c1', 'Waiting', { now: '2' }).items;
+    const moved = moveCardAcross(board, { activeId: 'c1', overId: 'user-2' });
+    board = applyDragLanding(moved, 'c1', { fromColumn: 'waiting', now: '3' });
+
+    const card = findCard(board, 'c1');
+    expect(card.history.map((e) => `${e.at}:${e.kind}:${e.to}`)).toEqual([
+      '1:status:Drafting',
+      '2:status:Waiting',
+      '2:column:waiting',
+      '3:column:user-2',
+      '3:status:Drafting',
+    ]);
+  });
+});
+
+describe('waitingSince tracking', () => {
+  it('stamps waitingSince when status moves a card into waiting', () => {
+    const { items } = setCardStatus(makeBoard(), 'c1', 'Waiting', { now: NOW });
+    expect(findCard(items, 'c1').waitingSince).toBe(NOW);
+  });
+
+  it('clears waitingSince when status moves a card out of waiting', () => {
+    const board = makeBoard();
+    board.waiting[0].waitingSince = '2026-06-01T00:00:00.000Z';
+    const { items } = setCardStatus(board, 'c6', 'Drafting', { now: NOW });
+    expect(findCard(items, 'c6').waitingSince).toBeNull();
+  });
+
+  it('stamps waitingSince when a drag lands in waiting', () => {
+    const moved = moveCardAcross(makeBoard(), { activeId: 'c1', overId: 'waiting' });
+    const next = applyDragLanding(moved, 'c1', { fromColumn: 'user-1', now: NOW });
+    expect(findCard(next, 'c1').waitingSince).toBe(NOW);
+  });
+
+  it('clears waitingSince and statusCheckAt when a drag leaves waiting', () => {
+    const board = makeBoard();
+    board.waiting[0].waitingSince = '2026-06-01T00:00:00.000Z';
+    board.waiting[0].statusCheckAt = '2026-06-10T00:00:00.000Z';
+    const moved = moveCardAcross(board, { activeId: 'c6', overId: 'user-2' });
+    const next = applyDragLanding(moved, 'c6', { fromColumn: 'waiting', now: NOW });
+    const card = findCard(next, 'c6');
+    expect(card.waitingSince).toBeNull();
+    expect(card.statusCheckAt).toBeNull();
+  });
+});
+
+describe('status checks', () => {
+  const NINE_DAYS_AGO = '2026-06-18T10:00:00.000Z';
+  const TWO_DAYS_AGO = '2026-06-25T10:00:00.000Z';
+
+  const makeWaitingBoard = () => {
+    const board = makeBoard();
+    board.waiting = [
+      { id: 'w1', title: 'Old', status: 'Waiting', waitingSince: NINE_DAYS_AGO, previousColumn: 'user-1', previousStatus: 'Drafting' },
+      { id: 'w2', title: 'Fresh', status: 'Waiting', waitingSince: TWO_DAYS_AGO },
+      { id: 'w3', title: 'No stamp', status: 'Waiting' },
+    ];
+    return board;
+  };
+
+  it('getStatusCheckDueCards returns only Waiting cards past the threshold', () => {
+    const due = getStatusCheckDueCards(makeWaitingBoard(), { now: NOW });
+    expect(due.map((c) => c.id)).toEqual(['w1']);
+  });
+
+  it('getStatusCheckDueCards respects a custom threshold', () => {
+    const due = getStatusCheckDueCards(makeWaitingBoard(), { now: NOW, thresholdDays: 1 });
+    expect(due.map((c) => c.id)).toEqual(['w1', 'w2']);
+  });
+
+  it('getStatusCheckDueCards returns nothing for an invalid now', () => {
+    expect(getStatusCheckDueCards(makeWaitingBoard(), { now: 'not-a-date' })).toEqual([]);
+  });
+
+  it('applyStatusChecks flags due cards with status, timestamp, and history', () => {
+    const { items, flaggedIds } = applyStatusChecks(makeWaitingBoard(), { now: NOW });
+    expect(flaggedIds).toEqual(['w1']);
+    const flagged = findCard(items, 'w1');
+    expect(flagged.status).toBe('Status Check');
+    expect(flagged.statusCheckAt).toBe(NOW);
+    expect(flagged.waitingSince).toBe(NINE_DAYS_AGO);
+    expect(flagged.history.at(-1)).toMatchObject({ kind: 'status', from: 'Waiting', to: 'Status Check' });
+    expect(findContainer(items, 'w1')).toBe('waiting');
+  });
+
+  it('applyStatusChecks is idempotent — already flagged cards are not reflagged', () => {
+    const first = applyStatusChecks(makeWaitingBoard(), { now: NOW }).items;
+    const second = applyStatusChecks(first, { now: NOW });
+    expect(second.flaggedIds).toEqual([]);
+    expect(second.items).toBe(first);
+  });
+
+  it('getStatusCheckCards returns flagged cards', () => {
+    const { items } = applyStatusChecks(makeWaitingBoard(), { now: NOW });
+    expect(getStatusCheckCards(items).map((c) => c.id)).toEqual(['w1']);
+  });
+
+  it('resolveStatusCheck archive sends the card to the archive as Done', () => {
+    const flagged = applyStatusChecks(makeWaitingBoard(), { now: NOW }).items;
+    const next = resolveStatusCheck(flagged, 'w1', { action: 'archive', now: NOW });
+    const card = findCard(next, 'w1');
+    expect(findContainer(next, 'w1')).toBe('archive');
+    expect(card.status).toBe('Done');
+    expect(card.waitingSince).toBeNull();
+    expect(card.statusCheckAt).toBeNull();
+  });
+
+  it('resolveStatusCheck keep-waiting restarts the clock in place', () => {
+    const flagged = applyStatusChecks(makeWaitingBoard(), { now: NOW }).items;
+    const later = '2026-06-28T10:00:00.000Z';
+    const next = resolveStatusCheck(flagged, 'w1', { action: 'keep-waiting', now: later });
+    const card = findCard(next, 'w1');
+    expect(findContainer(next, 'w1')).toBe('waiting');
+    expect(card.status).toBe('Waiting');
+    expect(card.waitingSince).toBe(later);
+    expect(card.statusCheckAt).toBeNull();
+  });
+
+  it('resolveStatusCheck assign moves the card to the chosen column with its prior status', () => {
+    const flagged = applyStatusChecks(makeWaitingBoard(), { now: NOW }).items;
+    const next = resolveStatusCheck(flagged, 'w1', { action: 'assign', destinationColumn: 'user-2', now: NOW });
+    const card = findCard(next, 'w1');
+    expect(findContainer(next, 'w1')).toBe('user-2');
+    expect(card.status).toBe('Drafting');
+    expect(card.waitingSince).toBeNull();
+    expect(card.statusCheckAt).toBeNull();
+  });
+
+  it('resolveStatusCheck assign falls back to the stashed previous column when no destination is given', () => {
+    const flagged = applyStatusChecks(makeWaitingBoard(), { now: NOW }).items;
+    const next = resolveStatusCheck(flagged, 'w1', { action: 'assign', now: NOW });
+    expect(findContainer(next, 'w1')).toBe('user-1');
+  });
+
+  it('resolveStatusCheck ignores cards that are not flagged', () => {
+    const board = makeWaitingBoard();
+    expect(resolveStatusCheck(board, 'w2', { action: 'archive', now: NOW })).toBe(board);
   });
 });
