@@ -84,6 +84,8 @@ function DayPlanner({ items, memberId, onCardOpen }) {
 
   const grouped = { overdue: [], today: [], week: [], later: [], none: [] };
   for (const card of myCards) {
+    // Flagged cards already surface in the alerts section above the agenda.
+    if (card.status === 'Status Check') continue;
     grouped[classifyDueDate(card.dueDate, now)].push(card);
   }
 

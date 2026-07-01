@@ -1297,7 +1297,7 @@ button.projection-backdrop {
   align-items: stretch;
 }
 
-.my-panel {
+.my-centre-grid .my-panel {
   --panel-height: max(560px, calc(100vh - 170px));
 }
 
@@ -1610,7 +1610,7 @@ button.projection-backdrop {
     grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
   }
 
-  .my-panel {
+  .my-centre-grid .my-panel {
     --panel-height: max(480px, calc(100vh - 160px));
   }
 }
@@ -1620,8 +1620,8 @@ button.projection-backdrop {
     grid-template-columns: 1fr;
   }
 
-  .my-panel {
-    --panel-height: 440px;
+  .my-centre-grid .my-panel {
+    --panel-height: 480px;
   }
 
   .my-centre-toolbar {
