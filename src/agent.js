@@ -6,6 +6,14 @@
 // signature. Everything the UI knows about the agent goes through here.
 
 import { COLUMN_TITLES, TEAM_MEMBERS, getStatusCheckCards } from './board.js';
+import {
+  billableSplit,
+  categoryLabel,
+  filterEntries,
+  isoDate,
+  startOfWeek,
+  totalsBy,
+} from './time.js';
 
 export function parseDueDate(dueDate) {
   if (!dueDate) return null;
@@ -54,8 +62,96 @@ function summarise(items, memberId, now) {
   return { mine, grouped };
 }
 
+const CATEGORY_KEYWORDS = [
+  { key: 'bd', pattern: /\b(bd|business development|pitch|marketing|networking)\b/ },
+  { key: 'research', pattern: /\b(research|writing|article|paper|know-?how)\b/ },
+  { key: 'product', pattern: /\b(product|tech|tooling|dashboard|engineering)\b/ },
+  { key: 'training', pattern: /\b(training|cle|workshop|mentoring|course)\b/ },
+  { key: 'admin', pattern: /\b(admin|administration|ops|filing|billing)\b/ },
+  { key: 'client', pattern: /\b(client|matter|drafting|reviewing|negotiation)\b/ },
+];
+
+function activeCards(items) {
+  return Object.entries(items)
+    .filter(([column]) => column !== 'archive')
+    .flatMap(([, cards]) => cards);
+}
+
+function findMatterInText(text, items) {
+  let best = null;
+  let bestScore = 0;
+  for (const card of activeCards(items)) {
+    let score = 0;
+    const words = (card.title ?? '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3);
+    for (const word of words) {
+      if (text.includes(word)) score += 1;
+    }
+    if (card.client && text.includes(card.client.toLowerCase())) score += 2;
+    if (score > bestScore) {
+      best = card;
+      bestScore = score;
+    }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+// Parses "log 1.5h on the Acme MSA for reviewing the cap yesterday" into
+// time-entry fields (no id/loggedAt — the caller supplies those). Returns
+// null when the message is not a log command; returns { error } when it is
+// one but the hours are missing.
+export function parseLogCommand(message, { items, memberId, now = new Date() }) {
+  const text = (message ?? '').trim().toLowerCase();
+  if (!/^log\b/.test(text)) return null;
+
+  const hoursMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours)\b/);
+  const minutesMatch = text.match(/(\d+)\s*(?:m|min|mins|minutes)\b/);
+  let hours = hoursMatch ? Number(hoursMatch[1]) : 0;
+  if (minutesMatch) hours += Number(minutesMatch[1]) / 60;
+  hours = Math.round(hours * 100) / 100;
+  if (!hours) {
+    return { error: 'Tell me how long — e.g. “log 1.5h on the Acme MSA for reviewing the cap”.' };
+  }
+
+  const workDate = new Date(now);
+  if (/\byesterday\b/.test(text)) workDate.setDate(workDate.getDate() - 1);
+
+  const matter = findMatterInText(text, items);
+
+  let category = CATEGORY_KEYWORDS.find(({ pattern }) => pattern.test(text))?.key ?? null;
+  if (!category) category = matter ? 'client' : 'client';
+
+  const narrativeMatch = message.match(/\bfor\s+(.+)$/i);
+  let narrative = narrativeMatch ? narrativeMatch[1].trim() : '';
+  narrative = narrative.replace(/\s+yesterday$/i, '').trim();
+
+  return {
+    memberId,
+    cardId: matter?.id ?? null,
+    matterTitle: matter?.title ?? null,
+    client: matter?.client ?? null,
+    category,
+    date: isoDate(workDate),
+    hours,
+    narrative,
+  };
+}
+
+function describeWeekTime(timeEntries, memberId, now) {
+  const weekStart = isoDate(startOfWeek(now));
+  const mine = filterEntries(timeEntries ?? [], { memberId, from: weekStart });
+  if (mine.length === 0) {
+    return 'You have no time logged this week yet. Say something like “log 1.5h on the Acme MSA for reviewing the cap” and I will record it.';
+  }
+  const split = billableSplit(mine);
+  const byCategory = [...totalsBy(mine, (e) => e.category).entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, hrs]) => `• ${categoryLabel(key)}: ${hrs}h`)
+    .join('\n');
+  return `This week you have logged ${split.total}h (${split.billablePct}% billable):\n${byCategory}`;
+}
+
 // Pure and synchronous so it is unit-testable; `getAgentReply` wraps it.
-export function getAgentReplyText(message, { items, memberId, now = new Date() }) {
+export function getAgentReplyText(message, { items, memberId, timeEntries = [], now = new Date() }) {
   const text = (message ?? '').toLowerCase();
   const member = TEAM_MEMBERS.find((m) => m.id === memberId);
   const { mine, grouped } = summarise(items, memberId, now);
@@ -70,6 +166,10 @@ export function getAgentReplyText(message, { items, memberId, now = new Date() }
       return 'No matters are flagged for a status check right now.';
     }
     return `${statusChecks.length} matter${statusChecks.length === 1 ? ' needs' : 's need'} a status check:\n${listCards(statusChecks)}\nOpen a flagged matter to reassign it, keep it waiting, or archive it.`;
+  }
+
+  if (/\b(time|timesheet|hours|logged|billable|utilisation|utilization)\b/.test(text)) {
+    return describeWeekTime(timeEntries, memberId, now);
   }
 
   if (/\b(waiting|blocked|response)\b/.test(text)) {
@@ -104,18 +204,35 @@ export function getAgentReplyText(message, { items, memberId, now = new Date() }
     return `Your matters (${mine.length}):\n${listCards(mine)}`;
   }
 
-  const total = Object.entries(items)
-    .filter(([column]) => column !== 'archive')
-    .reduce((sum, [, cards]) => sum + cards.length, 0);
-  return `The board has ${total} active matter${total === 1 ? '' : 's'}${statusChecks.length ? `, ${statusChecks.length} of which need${statusChecks.length === 1 ? 's' : ''} a status check` : ''}. Try asking: “what's due this week?”, “what am I waiting on?”, or “show my matters”.`;
+  const total = activeCards(items).length;
+  return `The board has ${total} active matter${total === 1 ? '' : 's'}${statusChecks.length ? `, ${statusChecks.length} of which need${statusChecks.length === 1 ? 's' : ''} a status check` : ''}. Try asking: “what's due this week?”, “how much time have I logged?”, or say “log 1.5h on the Acme MSA for reviewing the cap”.`;
+}
+
+// One agent turn: commands first (they have effects), then read-only Q&A.
+// Returns { text, timeEntry } — `timeEntry` is set when the message logged
+// time and the caller should append it to the ledger.
+export function runAgentTurn(message, context) {
+  const logResult = parseLogCommand(message, context);
+  if (logResult?.error) {
+    return { text: logResult.error, timeEntry: null };
+  }
+  if (logResult) {
+    const where = logResult.matterTitle ? ` on “${logResult.matterTitle}”` : '';
+    const note = logResult.narrative ? ` — ${logResult.narrative}` : '';
+    return {
+      text: `Logged ${logResult.hours}h of ${categoryLabel(logResult.category)}${where} for ${logResult.date}${note}. It's on your timesheet.`,
+      timeEntry: logResult,
+    };
+  }
+  return { text: getAgentReplyText(message, context), timeEntry: null };
 }
 
 export async function getAgentReply(message, context) {
-  // Placeholder transport: local rules over the live board. Swap this body
-  // for a call to the real agent endpoint when it exists.
-  const reply = getAgentReplyText(message, context);
+  // Placeholder transport: local rules over the live board and ledger. Swap
+  // this body for a call to the real agent endpoint when it exists.
+  const result = runAgentTurn(message, context);
   await new Promise((resolve) => setTimeout(resolve, 350 + Math.random() * 400));
-  return reply;
+  return result;
 }
 
 export function getColumnTitle(columnId) {

@@ -4,6 +4,8 @@ import {
   getAgentReplyText,
   getCardsForMember,
   parseDueDate,
+  parseLogCommand,
+  runAgentTurn,
 } from './agent.js';
 
 const NOW = new Date('2026-06-27T10:00:00');
@@ -90,5 +92,68 @@ describe('getAgentReplyText', () => {
     const reply = getAgentReplyText('xyzzy', context);
     expect(reply).toContain('active matter');
     expect(reply).toContain('Try asking');
+  });
+
+  it('summarises the week when asked about time', () => {
+    const timeEntries = [
+      { id: 't1', memberId: 'user-1', date: '2026-06-25', hours: 2, category: 'client', narrative: '', billable: true, cardId: null, matterTitle: null, client: null, loggedAt: null },
+      { id: 't2', memberId: 'user-1', date: '2026-06-26', hours: 1, category: 'bd', narrative: '', billable: false, cardId: null, matterTitle: null, client: null, loggedAt: null },
+    ];
+    const reply = getAgentReplyText('how much time have I logged?', { ...context, timeEntries });
+    expect(reply).toContain('3h');
+    expect(reply).toContain('Client Work');
+    expect(reply).toContain('Business Development');
+  });
+});
+
+describe('parseLogCommand', () => {
+  const context = { items: makeBoard(), memberId: 'user-1', now: new Date('2026-06-27T10:00:00') };
+
+  it('returns null for non-log messages', () => {
+    expect(parseLogCommand('what is due today?', context)).toBeNull();
+  });
+
+  it('parses hours, matter, category, and narrative', () => {
+    const entry = parseLogCommand('log 1.5h on the MSA review for checking the liability cap', context);
+    expect(entry).toMatchObject({
+      memberId: 'user-1',
+      hours: 1.5,
+      cardId: 'c1',
+      matterTitle: 'MSA review',
+      category: 'client',
+      date: '2026-06-27',
+      narrative: 'checking the liability cap',
+    });
+  });
+
+  it('understands minutes, yesterday, and category keywords', () => {
+    const entry = parseLogCommand('log 45m of business development yesterday', context);
+    expect(entry).toMatchObject({
+      hours: 0.75,
+      category: 'bd',
+      date: '2026-06-26',
+      cardId: null,
+    });
+  });
+
+  it('asks for a duration when none is given', () => {
+    expect(parseLogCommand('log the acme call', context)).toHaveProperty('error');
+  });
+});
+
+describe('runAgentTurn', () => {
+  const context = { items: makeBoard(), memberId: 'user-1', timeEntries: [], now: new Date('2026-06-27T10:00:00') };
+
+  it('returns a confirmation and the entry for a log command', () => {
+    const result = runAgentTurn('log 2h on the Handbook for drafting the leave policy', context);
+    expect(result.timeEntry).toMatchObject({ hours: 2, cardId: 'c2' });
+    expect(result.text).toContain('Logged 2h');
+    expect(result.text).toContain('Handbook');
+  });
+
+  it('returns plain text with no entry for questions', () => {
+    const result = runAgentTurn('what am I waiting on?', context);
+    expect(result.timeEntry).toBeNull();
+    expect(typeof result.text).toBe('string');
   });
 });
