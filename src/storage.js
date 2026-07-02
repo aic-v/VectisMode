@@ -3,10 +3,13 @@
 // versioned so a future schema change can invalidate stale state cleanly.
 
 import { COLUMN_TITLES } from './board.js';
+import { normalizeTimeEntry } from './time.js';
 
 export const BOARD_STORAGE_KEY = 'vectis:board:v1';
 export const IDENTITY_STORAGE_KEY = 'vectis:identity:v1';
 export const CHAT_STORAGE_KEY = 'vectis:chat:v1';
+export const TIME_STORAGE_KEY = 'vectis:time:v1';
+export const SHARING_STORAGE_KEY = 'vectis:sharing:v1';
 
 const BOARD_COLUMN_KEYS = Object.keys(COLUMN_TITLES);
 
@@ -59,4 +62,16 @@ export function loadBoard() {
 
 export function saveBoard(items) {
   saveJSON(BOARD_STORAGE_KEY, items);
+}
+
+// Time entries are validated one by one — a single corrupt entry drops out
+// instead of discarding the whole ledger.
+export function loadTimeEntries() {
+  const stored = loadJSON(TIME_STORAGE_KEY);
+  if (!Array.isArray(stored)) return null;
+  return stored.map((entry) => normalizeTimeEntry(entry)).filter(Boolean);
+}
+
+export function saveTimeEntries(entries) {
+  saveJSON(TIME_STORAGE_KEY, entries);
 }
