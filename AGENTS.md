@@ -29,11 +29,13 @@ The `Vectis Law Command Center` label is a small fixed element in the bottom-rig
 - [src/App.jsx](src/App.jsx) — React components for the team board and overlays, drag state, orchestration of status changes and the status-check sweep.
 - [src/board.js](src/board.js) — pure helpers for every board mutation: moves, reorders, status changes (with column coupling), drag landing, work-log/history appends, and the status-check family. All board mutations go through these.
 - [src/MyCommandCentre.jsx](src/MyCommandCentre.jsx) — the personalised view: identity picker, day planner, agent chat.
-- [src/agent.js](src/agent.js) — the Vectis Assistant. `getAgentReply` is the seam for a future real agent endpoint; today it answers with local rules over the live board. Also holds due-date parsing/classification and the "my matters" heuristic.
-- [src/storage.js](src/storage.js) — versioned localStorage persistence (board, identity, chat) with shape validation.
-- [src/index.css](src/index.css) — design tokens, layout, projection/flip animations, status-check and My Command Centre styles, responsive rules.
-- [src/board.test.js](src/board.test.js), [src/storage.test.js](src/storage.test.js), [src/agent.test.js](src/agent.test.js) — Vitest suites (74 tests).
-- [e2e/](e2e/) — Playwright suites (25 tests) with shared helpers in [e2e/helpers.js](e2e/helpers.js), configured by [playwright.config.js](playwright.config.js).
+- [src/time.js](src/time.js) — the time ledger: work categories, entry validation, filters/totals/week buckets, sharing-level enforcement, and the Zoho-mappable CSV export. Pure module — see [Time Ledger & Timesheets](#time-ledger--timesheets).
+- [src/Timesheets.jsx](src/Timesheets.jsx) — the Timesheet overlay: Me/Firm scope, period + grouping filters, inline entry editing, CSV download.
+- [src/agent.js](src/agent.js) — the Vectis Assistant. `getAgentReply` is the seam for a future real agent endpoint; today it answers with local rules over the live board and ledger, and parses `log …` commands (its first write capability). Also holds due-date parsing/classification and the "my matters" heuristic.
+- [src/storage.js](src/storage.js) — versioned localStorage persistence (board, identity, chat, time entries, sharing levels) with shape validation.
+- [src/index.css](src/index.css) — design tokens (including the validated work-category palette), layout, projection/flip animations, status-check, My Command Centre, and timesheet styles, responsive rules.
+- [src/board.test.js](src/board.test.js), [src/time.test.js](src/time.test.js), [src/storage.test.js](src/storage.test.js), [src/agent.test.js](src/agent.test.js) — Vitest suites (96 tests).
+- [e2e/](e2e/) — Playwright suites (31 tests) with shared helpers in [e2e/helpers.js](e2e/helpers.js), configured by [playwright.config.js](playwright.config.js).
 
 Sample card data is hardcoded in `INITIAL_ITEMS` inside [src/board.js](src/board.js); on a fresh browser it seeds the board, after which localStorage state wins — see [Persistence](#persistence).
 
@@ -100,7 +102,7 @@ Both helpers append events to `card.history` so the audit trail stays consistent
 
 ## Status Check Workflow
 
-The 7-day Waiting-Response watchdog (roadmap item now shipped; remaining work in [roadmap.md §5.1](roadmap.md#51-status-check--remaining-work)):
+The 7-day Waiting-Response watchdog (roadmap item now shipped; remaining work in [roadmap.md §5.1](roadmap.md#61-status-check--remaining-work)):
 
 - Every card entering the `waiting` column gets `waitingSince`. A sweep in `App` (on mount, then every 60s) calls `applyStatusChecks`, which flags `Waiting` cards older than `STATUS_CHECK_THRESHOLD_DAYS` (7) as status **`Status Check`** and stamps `statusCheckAt`. The sweep is idempotent — already-flagged cards are untouched.
 - Surfacing: amber card front, a `.status-check-banner` above the team board (each flagged matter is a click-to-open chip), and an alerts section at the top of the My Command Centre planner.
@@ -113,11 +115,32 @@ The 7-day Waiting-Response watchdog (roadmap item now shipped; remaining work in
 
 ## My Command Centre
 
-`commandMode === 'mine'` replaces the board with [src/MyCommandCentre.jsx](src/MyCommandCentre.jsx): a two-column layout (day planner left, agent chat right) beneath a "Viewing as" identity picker.
+`commandMode === 'mine'` replaces the board with [src/MyCommandCentre.jsx](src/MyCommandCentre.jsx): a "Sharing" + "Viewing as" toolbar, the full-width **My time** week strip, then a two-column grid (day planner left, agent chat right).
 
 - **Identity** — a select over `TEAM_MEMBERS` ([src/board.js](src/board.js)), persisted to localStorage. "My matters" = the member's column plus cards in `waiting`/`available` whose `owner` matches the member name (heuristic until an assignee model exists — [roadmap 1.3](roadmap.md#13-assignee-model)).
+- **My time** — this week's hours as category-stacked daily bars with total and billable %, plus an "Open timesheet" shortcut. See [Time Ledger & Timesheets](#time-ledger--timesheets).
 - **Day planner** — status-check alerts first, then the agenda grouped Overdue / Due today / Next 7 days / Later / No due date (flagged cards are excluded from these groups to avoid duplication), then a Monday-first month calendar with dots on days where matters are due. Agenda items open the regular Matter view.
-- **Agent chat ("Vectis Assistant")** — message list + input. Replies come from `getAgentReply` in [src/agent.js](src/agent.js): today a local rules engine over the live board (due dates, waiting matters, status checks, workload, archive); the function is the single seam to swap in a real agent endpoint. Chat history persists to localStorage. The panel is labelled "preview" and the empty state says replies are generated locally.
+- **Agent chat ("Vectis Assistant")** — message list + input. Replies come from `getAgentReply` in [src/agent.js](src/agent.js): today a local rules engine over the live board and time ledger (due dates, waiting matters, status checks, workload, weekly time summaries), plus the `log …` command which writes a ledger entry via the `timeEntry` field on the structured reply. The function is the single seam to swap in a real agent endpoint. Chat history persists to localStorage. The panel is labelled "preview" and the empty state says replies are generated locally.
+
+The panel heights budget for the toolbar and time strip (`.my-centre-grid .my-panel`) so the fixed bottom controls never overlap the chat input — validated by the responsive spec.
+
+## Time Ledger & Timesheets
+
+Time is a **global ledger** ([src/time.js](src/time.js)), not card data — because firm time (business development, training, product work) does not always have a matter card. Card work-logs *feed* the ledger; the ledger is the single source of truth for hours. Direction settled with the user (July 2026): the tool's primary purpose is individual-first productivity visibility, with org visibility subject to the individual's comfort and billing timesheets as a by-product.
+
+**Entry shape:** `{ id, memberId, cardId?, matterTitle?, client?, category, date (YYYY-MM-DD), hours, narrative, billable, loggedAt }`. Entries are validated by `normalizeTimeEntry` on every write and on load.
+
+**Work categories** (`WORK_CATEGORIES`): Client Work (billable by default) · Business Development · Research & Writing · Product & Tech · Training · Firm Administration. The category defaults the `billable` flag; it is overridable per entry. Value is deliberately not billable-only — the categories exist so non-billable contributions are visible. Category colors are CSS custom properties (`--cat-<key>`) — categorical palette slots in fixed order, CVD-validated against the panel surface.
+
+**Three capture surfaces**, all stamping the current identity and funnelling through `App.logTime`:
+
+1. The drag-flip **work-log form** — hours + a new category select; saving also appends a card work-log entry as before.
+2. The **quick-add row** in the Matter view's Time section (hours, category, date, narrative). The section lists the matter's latest entries and a running total; the footer's `Time entries` button opens the Timesheet overlay pre-filtered to the matter.
+3. The **assistant chat** — `parseLogCommand` understands e.g. `log 1.5h on the Acme MSA for reviewing the cap yesterday` / `log 45m of business development` (hours or minutes, matter fuzzy-matched by title/client words, category keywords, today/yesterday, narrative after "for").
+
+**Sharing levels** (`SHARE_LEVELS`, picked per member in the My Command Centre toolbar, stored in `vectis:sharing:v1`): `full` (default — org sees entries) · `totals` (org sees only aggregate hours) · `private` (excluded, but counted so firm views say "N members private" rather than under-reporting silently). `applyShareLevels` enforces this in the Firm scope; the Me scope always shows the member their own detail.
+
+**Surfaces:** the **My time panel** in My Command Centre (week strip of category-stacked bars, total + billable %, legend) and the **Timesheet overlay** ([src/Timesheets.jsx](src/Timesheets.jsx)) reachable from the fixed header button, the My time panel, or a matter footer — Me/Firm scope, period presets, grouping by date/matter/client/category, inline narrative/hours/billable editing, delete, and **Export CSV** with Zoho Books-mappable columns (`Date, User, Client, Matter, Category, Notes, Hours, Billable Status`). Decision on record: export stays neutral CSV, shaped for a later Zoho Books integration.
 
 ## Persistence
 
@@ -126,6 +149,8 @@ Stopgap, single-browser persistence via versioned localStorage keys in [src/stor
 - `vectis:board:v1` — the full `items` object, saved on every change, validated with `isValidBoard` on load (bad/missing data falls back to `INITIAL_ITEMS`).
 - `vectis:identity:v1` — the My Command Centre identity.
 - `vectis:chat:v1` — assistant chat history.
+- `vectis:time:v1` — the time ledger; entries are validated individually on load so one corrupt entry drops out without discarding the ledger.
+- `vectis:sharing:v1` — per-member time-sharing levels.
 
 Bump a key's version to invalidate stored state after a schema change. Real backend persistence is still an open decision — [roadmap 2.1](roadmap.md#21-backend-persistence).
 
@@ -155,13 +180,14 @@ Mechanics:
 
 These are facts about today's code. The plan to address each lives in [roadmap.md](roadmap.md).
 
-1. Persistence is single-browser localStorage — no backend, no multi-user sync.
-2. Team columns are hardcoded via `TEAM_MEMBERS`; no dynamic roster, no manager role (status-check resolution is not permission-gated).
+1. Persistence is single-browser localStorage — no backend, no multi-user sync (which also means the Firm timesheet scope only aggregates this browser's ledger).
+2. Team columns are hardcoded via `TEAM_MEMBERS`; no dynamic roster, no manager role (status-check resolution is not permission-gated, and sharing levels are set per browser, not per authenticated user).
 3. The assistant chat is a local rules engine, not a real agent; `aiContext` remains hand-authored placeholder text.
 4. "Notify users and manager" for status checks means in-app surfacing only — no email/push.
 5. "My matters" relies on the free-text `owner` field matching the member name.
-6. No component-level tests (`@testing-library/react`); coverage is pure helpers + browser E2E.
-7. No CI pipeline.
+6. Timesheets have no rates, no mark-as-billed state, and no invoice push — CSV export only.
+7. No component-level tests (`@testing-library/react`); coverage is pure helpers + browser E2E.
+8. No CI pipeline.
 
 ## Verification
 
@@ -169,9 +195,9 @@ Known-green commands:
 
 ```bash
 npm run lint
-npm test          # Vitest, 74 tests
+npm test          # Vitest, 96 tests
 npm run build
-npm run test:e2e  # Playwright, 25 tests (starts its own dev server)
+npm run test:e2e  # Playwright, 31 tests (starts its own dev server)
 ```
 
 Playwright launches the `chromium` project. If the exact Playwright browser build is not downloaded (e.g. sandboxed environments with a pre-installed browser), point it at a system Chromium:

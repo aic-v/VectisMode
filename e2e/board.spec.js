@@ -35,13 +35,15 @@ test.describe('details overlay', () => {
     await expect(cardIn(page, 'Partner A', 'Draft Employee Handbook v2')).toBeVisible();
   });
 
-  test('footer links point at the card URLs', async ({ page }) => {
+  test('footer carries the in-app time entries button and the external task folder link', async ({ page }) => {
     await page.goto('/');
     await openCard(page, 'Review MSA for Acme Corp');
 
-    const timeEntries = page.locator('.details-footer-link', { hasText: 'Time entries' });
-    await expect(timeEntries).toHaveAttribute('href', 'https://time.vectis.law/matters/c1');
-    await expect(timeEntries).toHaveAttribute('target', '_blank');
+    await expect(page.locator('.details-footer-button', { hasText: 'Time entries' })).toBeVisible();
+
+    const taskFolder = page.locator('.details-footer-link', { hasText: 'Task folder' });
+    await expect(taskFolder).toHaveAttribute('href', 'https://files.vectis.law/matters/c1');
+    await expect(taskFolder).toHaveAttribute('target', '_blank');
   });
 });
 
@@ -65,7 +67,7 @@ test.describe('status ↔ column coupling', () => {
     await closeDetails(page);
     await expect(cardIn(page, 'Partner B', 'Data Privacy Addendum')).toHaveCount(0);
 
-    await page.locator('.archive-button').click();
+    await page.locator('.archive-button', { hasText: 'Archive' }).click();
     await page.locator('.archive-list-item', { hasText: 'Data Privacy Addendum' }).click();
     await expect(page.locator('.focused-card-panel')).toBeVisible();
 
@@ -86,7 +88,7 @@ test.describe('status ↔ column coupling', () => {
     await metaField(page, 'Status').selectOption('Done');
     await closeDetails(page);
 
-    await page.locator('.archive-button').click();
+    await page.locator('.archive-button', { hasText: 'Archive' }).click();
     await page.locator('.archive-list-item', { hasText: 'Data Privacy Addendum' }).click();
     await metaField(page, 'Status').selectOption('Reviewing');
     await page.locator('.restore-picker-cancel').click();

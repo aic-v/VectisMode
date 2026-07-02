@@ -61,7 +61,7 @@ test.describe('waiting-response status check', () => {
 
     await expect(panel(page, 'Waiting Response').locator('.card-scene')).toHaveCount(0);
 
-    await page.locator('.archive-button').click();
+    await page.locator('.archive-button', { hasText: 'Archive' }).click();
     await expect(page.locator('.archive-list-item', { hasText: 'Response from Opposing Counsel' })).toBeVisible();
   });
 });

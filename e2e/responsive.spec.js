@@ -42,7 +42,14 @@ for (const { name, width, height, teamColumns } of BREAKPOINTS) {
       // The planner must be tall enough to be useful — a regression here
       // usually means the panel-height override lost its specificity battle.
       const plannerBox = await page.locator('.my-planner').boundingBox();
-      expect(plannerBox.height).toBeGreaterThanOrEqual(480);
+      expect(plannerBox.height).toBeGreaterThanOrEqual(420);
+
+      // And the whole view (toolbar + time strip + grid) must fit the viewport
+      // so the fixed bottom controls don't overlap the chat input.
+      if (width > 720) {
+        const gridBox = await page.locator('.my-centre-grid').boundingBox();
+        expect(gridBox.y + gridBox.height).toBeLessThanOrEqual(height - 40);
+      }
     });
   });
 }

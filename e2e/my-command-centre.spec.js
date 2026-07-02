@@ -36,13 +36,13 @@ test.describe('my command centre', () => {
   test('switching identity changes the planner and persists across reload', async ({ page }) => {
     await openMyCommandCentre(page);
 
-    await page.locator('.identity-select').selectOption('user-2');
+    await page.locator('[aria-label="Viewing as"]').selectOption('user-2');
     await expect(page.locator('.agenda-item', { hasText: 'Data Privacy Addendum' })).toBeVisible();
     await expect(page.locator('.agenda-item', { hasText: 'Draft Employee Handbook' })).toHaveCount(0);
 
     await page.reload();
     await page.locator('.command-mode-toggle button', { hasText: 'My Command Centre' }).click();
-    await expect(page.locator('.identity-select')).toHaveValue('user-2');
+    await expect(page.locator('[aria-label="Viewing as"]')).toHaveValue('user-2');
   });
 
   test('the assistant chat answers and persists history', async ({ page }) => {

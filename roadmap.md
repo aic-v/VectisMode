@@ -31,7 +31,7 @@ Board state, identity, and chat history now survive refresh via versioned localS
 The swap is designed to be cheap: `loadBoard()`/`saveBoard()` in `storage.js` are the only seam, and the stored shape (`columns` → `cards` with `status`, `previousStatus`, `previousColumn`, `waitingSince`, `statusCheckAt`, `workLog[]`, `history[]`) is already the right data model. Card position/order is stored explicitly in the column arrays.
 
 ### 2.2 Real navigation targets for details-view links
-The details-view footer links (`Time entries`, `Task folder`) now open the card's `timeEntriesUrl` / `taskFolderUrl` in a new tab when present. The sample data points at placeholder `*.vectis.law` hosts — swap these for the real time-tracking and document systems once chosen **(decision pending: which systems)**.
+`Time entries` is now an in-app button (it opens the Timesheet overlay scoped to the matter — time-tracking lives in this tool). `Task folder` still opens the card's `taskFolderUrl` in a new tab, and the sample data points at a placeholder `files.vectis.law` host — swap for the real document system once chosen **(decision pending: which system)**.
 
 ## 3. Views & Navigation
 
@@ -39,8 +39,8 @@ The details-view footer links (`Time entries`, `Task folder`) now open the card'
 The toggle now renders a real personalised view (day planner + agent chat — see [AGENTS.md, My Command Centre](AGENTS.md#my-command-centre)). Direction confirmed with the user (July 2026): it is *the* individualised surface, and should grow. Ideas queued:
 
 - Real calendar integration (external calendar feeds, meetings — not just card due dates).
-- Richer agent conversation, including multi-agent support ("personal agent" chat is the first face of this).
-- More personal widgets — time logged this week, matters recently touched, upcoming filing deadlines.
+- Richer agent conversation, including multi-agent support ("personal agent" chat is the first face of this). The agent can now log time; more write-actions (move a matter, set a status) are the natural next step.
+- More personal widgets — matters recently touched, upcoming filing deadlines. (The time-logged-this-week widget shipped as the My time panel.)
 
 ### 3.2 Dynamic team roster
 The four team columns are hardcoded, now via the `TEAM_MEMBERS` constant in [src/board.js](src/board.js) (id + name). Drive this from a real team list once a backend exists, and add a **manager** role — the status-check workflow wants manager-only actions eventually.
@@ -53,26 +53,56 @@ The Vectis Assistant chat in My Command Centre answers from a local, rules-based
 ### 4.2 Real AI summaries
 The `aiContext` field is hand-authored placeholder text and now only a fallback for `description`. Replace with LLM-generated summaries driven by the card's actual data and logged work. Closely related to [AI-generated widget content](#11-ai-generated-widget-content).
 
-## 5. Workflow & Notifications
+## 5. Timesheets, Productivity & Billing
 
-### 5.1 Status check — remaining work
+Mission statement (user, July 2026): the tool's primary purpose is giving the individual — and the organisation, subject to the individual's comfort — visibility over productivity; billing timesheets follow as a by-product. Value is explicitly not billable-only: client work, business development, research & writing, product/tech, and training all count, hence the category model. The in-app ledger, capture surfaces, sharing levels, and CSV export are live (see [AGENTS.md, Time Ledger & Timesheets](AGENTS.md#time-ledger--timesheets)). Remaining:
+
+### 5.1 Billing integration
+Decision on record: keep the export **neutral but Zoho Books-compatible** (the workspace's likely billing system — final choice still open). Next steps, roughly in order:
+
+- **Mark-as-billed** state on entries so a period can be closed and never double-exported.
+- **Rates** per member (and per client override) so a timesheet can price itself.
+- **Print/PDF timesheet layout** for sending to clients directly.
+- **Zoho Books push** — create invoices/time entries via the connected Zoho Books account instead of CSV, once the backend and the billing decision land.
+
+### 5.2 Productivity depth
+- Weekly/monthly trends (this week vs last), per-category over time.
+- "Unaccounted time" nudges — the assistant notices gaps between board activity and logged hours and prompts.
+- Live timer capture (deliberately deferred from v1).
+- Configurable categories (they are a constant today).
+
+### 5.3 Sharing model hardening
+Sharing levels exist (`full` default / `totals` / `private`) but are browser-local settings on the identity picker. Real enforcement needs authentication and the backend — until then it is a UX contract, not a security boundary.
+
+## 6. Workflow & Notifications
+
+### 6.1 Status check — remaining work
 The 7-day Waiting-Response status check is live in-app (see [AGENTS.md, Status Check Workflow](AGENTS.md#status-check-workflow)). Remaining:
 
 - **Real notifications.** "Notify each user working on the card and the team's manager" currently means the in-app banner and planner alerts. Email/push needs notification infra and the manager role from [Dynamic team roster](#32-dynamic-team-roster).
 - **Manager gating.** Anyone can currently resolve a status check; once roles exist, resolution should be manager-only (assignees stay notified).
 - **Threshold configuration.** 7 days is a constant (`STATUS_CHECK_THRESHOLD_DAYS`); consider per-team or per-matter overrides.
 
-## 6. Quality & Verification
+## 7. Quality & Verification
 
-### 6.1 UI component tests
-Vitest covers the pure helpers (74 tests); Playwright covers the real flows in-browser (25 tests). The middle layer — component tests with `@testing-library/react` — is still absent. Worth adding if overlay orchestration logic in `App.jsx` keeps growing.
+### 7.1 UI component tests
+Vitest covers the pure helpers (96 tests); Playwright covers the real flows in-browser (31 tests). The middle layer — component tests with `@testing-library/react` — is still absent. Worth adding if overlay orchestration logic in `App.jsx` keeps growing.
 
-### 6.2 CI
+### 7.2 CI
 No CI pipeline runs the suites yet. `npm run lint && npm test && npm run build && npm run test:e2e` is the full gate; wire it into GitHub Actions. Note the Playwright browser-build caveat in [AGENTS.md, Verification](AGENTS.md#verification).
 
-## 7. Done / Decided (kept for context)
+## 8. Done / Decided (kept for context)
 
 These are settled and live in the code today. Listed here so future agents do not re-open them as "ideas".
+
+**Time ledger, capture, and timesheets** *(new — July 2026)*
+
+- Time entries are a **global ledger** ([src/time.js](src/time.js)), not card data — BD/training/product time needs no matter card. Card work-logs feed the ledger.
+- Six **work categories** (Client Work · Business Development · Research & Writing · Product & Tech · Training · Firm Administration) with per-category billable defaults, overridable per entry. Decided: productivity is category-based, not billable-only.
+- Three capture surfaces, all attributed to the current identity: the drag-flip work-log form (now with a category select), a quick-add row in the Matter view's Time section, and the assistant's `log 1.5h on the Acme MSA for …` chat command.
+- **Sharing levels** per member — `full` (the decided default) / `totals` / `private` — enforced in the Firm scope of the Timesheet overlay, with private members counted rather than silently omitted.
+- **Timesheet overlay** (header button, My time panel, or matter footer): Me/Firm scope, period presets, group by date/matter/client/category, inline edit/delete, billable toggles, and CSV export with Zoho Books-mappable columns. Decided: neutral CSV now, shaped for a Zoho Books integration later.
+- **My time panel** in My Command Centre: week strip of category-stacked daily bars (validated categorical palette, `--cat-*` tokens), weekly total, billable split.
 
 **Status check workflow (7-day Waiting Response watchdog)** *(new)*
 

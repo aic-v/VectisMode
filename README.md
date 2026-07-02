@@ -27,8 +27,10 @@ npm run preview   # preview the production build
 
 - **[src/App.jsx](src/App.jsx)** — React components for the team board and overlays, drag state, and orchestration of status changes.
 - **[src/board.js](src/board.js)** — pure helpers for every state transition: card moves, reorders, status changes (with column coupling), drag landing, work-log / history appends, and the status-check workflow.
-- **[src/MyCommandCentre.jsx](src/MyCommandCentre.jsx)** — the personalised view: identity picker, day planner, assistant chat.
-- **[src/agent.js](src/agent.js)** — the Vectis Assistant (local rules engine today; the seam for a real agent endpoint).
+- **[src/MyCommandCentre.jsx](src/MyCommandCentre.jsx)** — the personalised view: identity picker, My time week strip, day planner, assistant chat.
+- **[src/time.js](src/time.js)** — the time ledger: work categories, entry validation, totals, sharing levels, CSV export.
+- **[src/Timesheets.jsx](src/Timesheets.jsx)** — the Timesheet overlay (Me/Firm scope, grouping, export).
+- **[src/agent.js](src/agent.js)** — the Vectis Assistant (local rules engine today; the seam for a real agent endpoint). Understands questions and `log 1.5h on …` commands.
 - **[src/storage.js](src/storage.js)** — versioned localStorage persistence.
 - **[src/index.css](src/index.css)** — design tokens, layout, projection/flip animations, responsive rules.
 - **[e2e/](e2e/)** — Playwright browser tests.
@@ -42,8 +44,10 @@ npm run preview   # preview the production build
 - **Restoring from Archive prompts you.** Changing an archived card's status to anything other than `Done` surfaces an inline picker — pick a destination column or cancel the change. The card never moves silently.
 - **Drag is symmetric.** Dropping a card on `Waiting Response` sets status `Waiting` and remembers where it came from. Dragging it back out restores its previous status.
 - **History.** Every status and column change is appended to `card.history[]` and shown as a small log in the Matter view.
-- **My Command Centre.** The bottom-left toggle switches to a personal view: status-check alerts, a due-date agenda and month calendar, and the Vectis Assistant chat (answers generated locally for now).
-- **State survives refresh.** Board, identity, and chat persist to localStorage; a real backend is still on the roadmap.
+- **My Command Centre.** The bottom-left toggle switches to a personal view: your week's time as category-stacked bars, status-check alerts, a due-date agenda and month calendar, and the Vectis Assistant chat (answers generated locally for now).
+- **Time is a ledger, not a chore.** Hours are captured where work happens — the work-log form, a quick-add row on every matter, or by telling the assistant "log 1.5h on the Acme MSA". Entries carry a work category (client work, business development, research, product, training, admin) because value isn't billable-only.
+- **Timesheets fall out for free.** The Timesheet overlay filters by period, groups by matter/client/category, respects each member's sharing level (full detail / totals only / private — full is the default), and exports a Zoho Books-mappable CSV.
+- **State survives refresh.** Board, identity, chat, time entries, and sharing levels persist to localStorage; a real backend is still on the roadmap.
 
 ## Where to go next
 

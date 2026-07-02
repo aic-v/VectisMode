@@ -47,6 +47,7 @@ import {
   appendWorkLogEntry,
   applyDragLanding,
   applyStatusChecks,
+  findCard,
   findContainer as findContainerIn,
   getArchivedCards,
   getStatusCheckCards,
@@ -56,8 +57,30 @@ import {
   setCardStatus,
   updateCard as updateCardIn,
 } from './board.js';
-import { IDENTITY_STORAGE_KEY, loadBoard, loadJSON, saveBoard, saveJSON } from './storage.js';
+import {
+  IDENTITY_STORAGE_KEY,
+  SHARING_STORAGE_KEY,
+  loadBoard,
+  loadJSON,
+  loadTimeEntries,
+  saveBoard,
+  saveJSON,
+  saveTimeEntries,
+} from './storage.js';
+import {
+  DEFAULT_CATEGORY,
+  DEFAULT_SHARE_LEVEL,
+  WORK_CATEGORIES,
+  addTimeEntry,
+  categoryLabel,
+  filterEntries,
+  isoDate,
+  removeTimeEntry,
+  sumHours,
+  updateTimeEntry,
+} from './time.js';
 import MyCommandCentre from './MyCommandCentre.jsx';
+import TimesheetOverlay from './Timesheets.jsx';
 
 const STATUS_META = {
   'Not Started': { Icon: Circle },
@@ -207,12 +230,14 @@ function WorkLogForm({ cardId, cardTitle, cardStatus, onSave, onCancel }) {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [hours, setHours] = useState('');
+  const [category, setCategory] = useState(DEFAULT_CATEGORY);
   const [nextSteps, setNextSteps] = useState('');
 
   const descriptionId = `worklog-description-${cardId}`;
   const startDateId = `worklog-start-${cardId}`;
   const endDateId = `worklog-end-${cardId}`;
   const hoursId = `worklog-hours-${cardId}`;
+  const categoryId = `worklog-category-${cardId}`;
   const nextStepsId = `worklog-next-${cardId}`;
   const statusId = `worklog-status-${cardId}`;
 
@@ -291,17 +316,32 @@ function WorkLogForm({ cardId, cardTitle, cardStatus, onSave, onCancel }) {
         </div>
       </div>
 
-      <div className="form-group">
-        <label className="details-section-label" htmlFor={hoursId}>Est. time spent (hrs)</label>
-        <input
-          id={hoursId}
-          type="number"
-          step="0.5"
-          className="form-input"
-          placeholder="1.5"
-          value={hours}
-          onChange={(e) => setHours(e.target.value)}
-        />
+      <div className="form-row">
+        <div className="form-group">
+          <label className="details-section-label" htmlFor={hoursId}>Est. time spent (hrs)</label>
+          <input
+            id={hoursId}
+            type="number"
+            step="0.5"
+            className="form-input"
+            placeholder="1.5"
+            value={hours}
+            onChange={(e) => setHours(e.target.value)}
+          />
+        </div>
+        <div className="form-group">
+          <label className="details-section-label" htmlFor={categoryId}>Work category</label>
+          <select
+            id={categoryId}
+            className="form-input"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+          >
+            {WORK_CATEGORIES.map(({ key, label }) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="form-group">
@@ -328,6 +368,7 @@ function WorkLogForm({ cardId, cardTitle, cardStatus, onSave, onCancel }) {
                 startDate: startDate || null,
                 endDate: endDate || null,
                 hours: hours === '' ? null : Number(hours),
+                category,
                 nextSteps: nextSteps.trim(),
                 status,
                 loggedAt: new Date().toISOString(),
@@ -521,6 +562,108 @@ function StatusCheckPanel({ card, onResolve }) {
   );
 }
 
+function MatterTimeSection({ card, timeEntries, onLogTime, onOpenTimesheet }) {
+  const [hours, setHours] = useState('');
+  const [category, setCategory] = useState(DEFAULT_CATEGORY);
+  const [narrative, setNarrative] = useState('');
+  const [date, setDate] = useState(() => isoDate(new Date()));
+
+  const matterEntries = filterEntries(timeEntries, { cardId: card.id });
+  const total = sumHours(matterEntries);
+
+  const handleAdd = () => {
+    const parsed = Number(hours);
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    onLogTime({
+      cardId: card.id,
+      hours: parsed,
+      category,
+      narrative: narrative.trim(),
+      date,
+    });
+    setHours('');
+    setNarrative('');
+  };
+
+  return (
+    <div className="details-section">
+      <div className="matter-time-header">
+        <div className="details-section-label">Time</div>
+        {total > 0 ? (
+          <button
+            type="button"
+            className="matter-time-total"
+            onClick={() => onOpenTimesheet(card.id)}
+          >
+            {total}h logged →
+          </button>
+        ) : null}
+      </div>
+
+      <form
+        className="matter-time-quickadd"
+        onSubmit={(event) => {
+          event.preventDefault();
+          handleAdd();
+        }}
+      >
+        <input
+          className="form-input matter-time-hours"
+          aria-label="Hours"
+          type="number"
+          min="0.1"
+          step="0.1"
+          placeholder="hrs"
+          value={hours}
+          onChange={(event) => setHours(event.target.value)}
+        />
+        <select
+          className="form-input matter-time-category"
+          aria-label="Work category"
+          value={category}
+          onChange={(event) => setCategory(event.target.value)}
+        >
+          {WORK_CATEGORIES.map(({ key, label }) => (
+            <option key={key} value={key}>{label}</option>
+          ))}
+        </select>
+        <input
+          className="form-input matter-time-date"
+          aria-label="Work date"
+          type="date"
+          value={date}
+          onChange={(event) => setDate(event.target.value)}
+        />
+        <input
+          className="form-input matter-time-narrative"
+          aria-label="Narrative"
+          placeholder="What was the work?"
+          value={narrative}
+          onChange={(event) => setNarrative(event.target.value)}
+        />
+        <button type="submit" className="matter-time-add" disabled={!hours}>
+          Log
+        </button>
+      </form>
+
+      {matterEntries.length > 0 ? (
+        <ul className="matter-time-list">
+          {[...matterEntries].reverse().slice(0, 5).map((entry) => (
+            <li key={entry.id} className="matter-time-item">
+              <span className="matter-time-item-date">{entry.date}</span>
+              <span className="category-dot" style={{ background: `var(--cat-${entry.category})` }} />
+              <span className="matter-time-item-text">
+                {entry.narrative || categoryLabel(entry.category)}
+              </span>
+              <span className="matter-time-item-hours">{entry.hours}h</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function FocusedCardDetails({
   card,
   originRect,
@@ -531,6 +674,9 @@ function FocusedCardDetails({
   onPickRestoreColumn,
   onCancelPendingStatus,
   onResolveStatusCheck,
+  timeEntries,
+  onLogTime,
+  onOpenTimesheet,
 }) {
   const [expanded, setExpanded] = useState(false);
   const [target] = useState(getDetailsProjectionTarget);
@@ -736,6 +882,13 @@ function FocusedCardDetails({
             />
           </div>
 
+          <MatterTimeSection
+            card={card}
+            timeEntries={timeEntries}
+            onLogTime={onLogTime}
+            onOpenTimesheet={onOpenTimesheet}
+          />
+
           {Array.isArray(card.workLog) && card.workLog.length > 0 ? (
             <div className="details-section">
               <div className="details-section-label">Work log</div>
@@ -774,7 +927,15 @@ function FocusedCardDetails({
           ) : null}
 
           <div className="details-footer">
-            <DetailsFooterLink href={card.timeEntriesUrl} Icon={Timer} label="Time entries" />
+            <button
+              type="button"
+              className="details-footer-link details-footer-button"
+              onClick={() => onOpenTimesheet(card.id)}
+            >
+              <Timer size={16} />
+              Time entries
+              <ExternalLink size={13} />
+            </button>
             <DetailsFooterLink href={card.taskFolderUrl} Icon={FolderOpen} label="Task folder" />
           </div>
         </div>
@@ -984,6 +1145,17 @@ export default function App() {
   const [focusedCard, setFocusedCard] = useState(null);
   const [isArchiveOpen, setIsArchiveOpen] = useState(false);
   const [pendingStatusChange, setPendingStatusChange] = useState(null);
+  const [timeEntries, setTimeEntries] = useState(() => loadTimeEntries() ?? []);
+  const [sharing, setSharing] = useState(() => loadJSON(SHARING_STORAGE_KEY) ?? {});
+  const [timesheetView, setTimesheetView] = useState(null);
+
+  useEffect(() => {
+    saveTimeEntries(timeEntries);
+  }, [timeEntries]);
+
+  useEffect(() => {
+    saveJSON(SHARING_STORAGE_KEY, sharing);
+  }, [sharing]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -1116,6 +1288,48 @@ export default function App() {
     setItems((prev) => resolveStatusCheck(prev, cardId, { action, destinationColumn, now }));
   }, []);
 
+  // Append a ledger entry. Caller supplies the work fields; identity, matter
+  // context, id, and loggedAt are stamped here so every capture surface
+  // (work-log form, quick-add, chat) produces the same shape.
+  const logTime = useCallback((fields) => {
+    const card = fields.cardId ? findCard(items, fields.cardId) : null;
+    const entry = {
+      id: crypto.randomUUID(),
+      loggedAt: new Date().toISOString(),
+      memberId,
+      date: isoDate(new Date()),
+      matterTitle: card?.title ?? null,
+      client: card?.client ?? null,
+      ...fields,
+    };
+    setTimeEntries((prev) => addTimeEntry(prev, entry));
+  }, [items, memberId]);
+
+  const handleUpdateTimeEntry = useCallback((id, patch) => {
+    setTimeEntries((prev) => updateTimeEntry(prev, id, patch));
+  }, []);
+
+  const handleRemoveTimeEntry = useCallback((id) => {
+    setTimeEntries((prev) => removeTimeEntry(prev, id));
+  }, []);
+
+  const shareLevelFor = useCallback(
+    (id) => sharing[id] ?? DEFAULT_SHARE_LEVEL,
+    [sharing],
+  );
+
+  const setShareLevel = useCallback((id, level) => {
+    setSharing((prev) => ({ ...prev, [id]: level }));
+  }, []);
+
+  // Opening the timesheet closes the Matter view so the two overlays never
+  // stack (both listen for Escape).
+  const openTimesheet = useCallback((cardId) => {
+    setFocusedCard(null);
+    setPendingStatusChange(null);
+    setTimesheetView({ cardId: cardId ?? null });
+  }, []);
+
   const closeFocusedCard = useCallback(() => {
     setFocusedCard(null);
     setPendingStatusChange(null);
@@ -1147,6 +1361,15 @@ export default function App() {
   return (
     <div className="dashboard-container">
       <div className="dashboard-header">
+        <button
+          type="button"
+          className="archive-button"
+          aria-label="Open timesheet"
+          onClick={() => openTimesheet(null)}
+        >
+          <Timer size={14} />
+          <span>Timesheet</span>
+        </button>
         <button
           type="button"
           className="archive-button"
@@ -1242,6 +1465,11 @@ export default function App() {
           memberId={memberId}
           onMemberChange={setMemberId}
           onCardOpen={handleCardOpen}
+          timeEntries={timeEntries}
+          onLogTime={logTime}
+          shareLevel={shareLevelFor(memberId)}
+          onShareLevelChange={(level) => setShareLevel(memberId, level)}
+          onOpenTimesheet={openTimesheet}
         />
       )}
 
@@ -1256,6 +1484,18 @@ export default function App() {
             }
             if (payload?.entry && hasWorkLogContent(payload.entry)) {
               addWorkLogEntry(projectedCard.id, payload.entry);
+              if (payload.entry.hours) {
+                logTime({
+                  cardId: projectedCard.id,
+                  hours: payload.entry.hours,
+                  category: payload.entry.category,
+                  narrative: payload.entry.description,
+                  date:
+                    payload.entry.endDate ||
+                    payload.entry.startDate ||
+                    isoDate(new Date()),
+                });
+              }
             }
             preDragItemsRef.current = null;
             preDragRectRef.current = null;
@@ -1285,6 +1525,22 @@ export default function App() {
           onPickRestoreColumn={handlePickRestoreColumn}
           onCancelPendingStatus={cancelPendingStatus}
           onResolveStatusCheck={handleResolveStatusCheck}
+          timeEntries={timeEntries}
+          onLogTime={logTime}
+          onOpenTimesheet={openTimesheet}
+        />
+      ) : null}
+
+      {timesheetView ? (
+        <TimesheetOverlay
+          entries={timeEntries}
+          currentMemberId={memberId}
+          shareLevelFor={shareLevelFor}
+          initialCardId={timesheetView.cardId}
+          cardTitle={timesheetView.cardId ? findCard(items, timesheetView.cardId)?.title : null}
+          onClose={() => setTimesheetView(null)}
+          onUpdateEntry={handleUpdateTimeEntry}
+          onRemoveEntry={handleRemoveTimeEntry}
         />
       ) : null}
 
