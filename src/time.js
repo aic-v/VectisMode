@@ -74,7 +74,21 @@ export function normalizeTimeEntry(raw) {
     narrative: typeof raw.narrative === 'string' ? raw.narrative.trim() : '',
     billable,
     loggedAt: typeof raw.loggedAt === 'string' ? raw.loggedAt : null,
+    billedAt: typeof raw.billedAt === 'string' ? raw.billedAt : null,
   };
+}
+
+// Closing a period: stamp billedAt on the given entries so they can never be
+// double-exported. Already-billed entries keep their original stamp.
+export function markEntriesBilled(entries, ids, { now } = {}) {
+  const idSet = new Set(ids);
+  let changed = false;
+  const next = entries.map((entry) => {
+    if (!idSet.has(entry.id) || entry.billedAt) return entry;
+    changed = true;
+    return { ...entry, billedAt: now ?? null };
+  });
+  return changed ? next : entries;
 }
 
 export function addTimeEntry(entries, entry) {
@@ -190,27 +204,106 @@ export function applyShareLevels(entries, shareLevelFor) {
   };
 }
 
+// Rates: hourly rate per member, with an optional per-client override that
+// wins when both apply. Rates price *billable* entries only.
+export const DEFAULT_RATES = { currency: '£', members: {}, clients: {} };
+
+export function normalizeRates(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ...DEFAULT_RATES };
+  const cleanMap = (map) =>
+    Object.fromEntries(
+      Object.entries(map && typeof map === 'object' ? map : {}).filter(
+        ([, value]) => Number.isFinite(value) && value > 0,
+      ),
+    );
+  return {
+    currency: typeof raw.currency === 'string' && raw.currency ? raw.currency : DEFAULT_RATES.currency,
+    members: cleanMap(raw.members),
+    clients: cleanMap(raw.clients),
+  };
+}
+
+export function rateFor(entry, rates) {
+  if (!rates) return null;
+  if (entry.client && Number.isFinite(rates.clients?.[entry.client])) {
+    return rates.clients[entry.client];
+  }
+  if (Number.isFinite(rates.members?.[entry.memberId])) {
+    return rates.members[entry.memberId];
+  }
+  return null;
+}
+
+// Value of the billable portion. Unrated hours are surfaced, not silently
+// valued at zero, so a missing rate is visible.
+export function valueOfEntries(entries, rates) {
+  let amount = 0;
+  let ratedHours = 0;
+  let unratedHours = 0;
+  for (const entry of entries) {
+    if (!entry.billable) continue;
+    const rate = rateFor(entry, rates);
+    if (rate == null) {
+      unratedHours += entry.hours;
+    } else {
+      amount += entry.hours * rate;
+      ratedHours += entry.hours;
+    }
+  }
+  return {
+    amount: Math.round(amount * 100) / 100,
+    ratedHours: Math.round(ratedHours * 100) / 100,
+    unratedHours: Math.round(unratedHours * 100) / 100,
+  };
+}
+
+export function formatMoney(amount, currency = DEFAULT_RATES.currency) {
+  return `${currency}${amount.toLocaleString('en-GB', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+// Weekdays of the current week (Mon–Fri, strictly before `now`'s day) with
+// nothing logged — the raw material for "unaccounted time" nudges.
+export function unloggedWeekdays(entries, { memberId, now }) {
+  const todayIso = isoDate(now);
+  return weekOverview(entries, { memberId, weekStart: now })
+    .slice(0, 5)
+    .filter((day) => day.iso < todayIso && day.total === 0)
+    .map((day) => day.iso);
+}
+
 function csvCell(value) {
   const text = value == null ? '' : String(value);
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
 // Column names chosen to map 1:1 onto a Zoho Books timesheet/invoice import
-// (Date, User, Client, Project/Matter, Notes, Hours, Billable Status) while
-// staying a plain, neutral CSV.
-export function entriesToCsv(entries, { memberName = (id) => id } = {}) {
-  const header = ['Date', 'User', 'Client', 'Matter', 'Category', 'Notes', 'Hours', 'Billable Status'];
+// (Date, User, Client, Project/Matter, Notes, Hours, Billable Status, Rate,
+// Amount) while staying a plain, neutral CSV.
+export function entriesToCsv(entries, { memberName = (id) => id, rates } = {}) {
+  const header = [
+    'Date', 'User', 'Client', 'Matter', 'Category', 'Notes', 'Hours',
+    'Billable Status', 'Rate', 'Amount', 'Billed At',
+  ];
   const rows = [...entries]
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
-    .map((entry) => [
-      entry.date,
-      memberName(entry.memberId),
-      entry.client ?? '',
-      entry.matterTitle ?? '',
-      categoryLabel(entry.category),
-      entry.narrative,
-      entry.hours.toFixed(2),
-      entry.billable ? 'Billable' : 'Non-Billable',
-    ]);
+    .map((entry) => {
+      const rate = entry.billable ? rateFor(entry, rates) : null;
+      return [
+        entry.date,
+        memberName(entry.memberId),
+        entry.client ?? '',
+        entry.matterTitle ?? '',
+        categoryLabel(entry.category),
+        entry.narrative,
+        entry.hours.toFixed(2),
+        entry.billable ? 'Billable' : 'Non-Billable',
+        rate != null ? rate.toFixed(2) : '',
+        rate != null ? (rate * entry.hours).toFixed(2) : '',
+        entry.billedAt ? isoDate(entry.billedAt) : '',
+      ];
+    });
   return [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n');
 }

@@ -22,6 +22,7 @@ import {
   filterEntries,
   isoDate,
   startOfWeek,
+  unloggedWeekdays,
   weekOverview,
 } from './time.js';
 import { CHAT_STORAGE_KEY, loadJSON, saveJSON } from './storage.js';
@@ -207,6 +208,7 @@ function MyTimePanel({ timeEntries, memberId, onOpenTimesheet }) {
   const weekEntries = filterEntries(timeEntries, { memberId, from: weekStartIso });
   const split = billableSplit(weekEntries);
   const scaleHours = Math.max(8, ...days.map((d) => d.total));
+  const gaps = unloggedWeekdays(timeEntries, { memberId, now });
 
   const categoriesThisWeek = [
     ...new Set(days.flatMap((d) => Object.keys(d.byCategory))),
@@ -264,6 +266,22 @@ function MyTimePanel({ timeEntries, memberId, onOpenTimesheet }) {
           “log 1.5h on the Acme MSA for reviewing the cap”.
         </p>
       )}
+
+      {gaps.length > 0 && categoriesThisWeek.length > 0 ? (
+        <p className="my-time-nudge">
+          No time logged for{' '}
+          {gaps
+            .map((iso) =>
+              new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, {
+                weekday: 'short',
+                day: 'numeric',
+                month: 'short',
+              }),
+            )
+            .join(' · ')}
+          {' '}— backfill with “log 2h on … yesterday” in the chat.
+        </p>
+      ) : null}
     </div>
   );
 }

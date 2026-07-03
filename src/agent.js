@@ -13,6 +13,7 @@ import {
   isoDate,
   startOfWeek,
   totalsBy,
+  unloggedWeekdays,
 } from './time.js';
 
 export function parseDueDate(dueDate) {
@@ -147,7 +148,11 @@ function describeWeekTime(timeEntries, memberId, now) {
     .sort((a, b) => b[1] - a[1])
     .map(([key, hrs]) => `• ${categoryLabel(key)}: ${hrs}h`)
     .join('\n');
-  return `This week you have logged ${split.total}h (${split.billablePct}% billable):\n${byCategory}`;
+  const gaps = unloggedWeekdays(timeEntries ?? [], { memberId, now });
+  const gapNote = gaps.length
+    ? `\nNothing is logged for ${gaps.join(', ')} — say “log 2h on … yesterday” to backfill.`
+    : '';
+  return `This week you have logged ${split.total}h (${split.billablePct}% billable):\n${byCategory}${gapNote}`;
 }
 
 // Pure and synchronous so it is unit-testable; `getAgentReply` wraps it.

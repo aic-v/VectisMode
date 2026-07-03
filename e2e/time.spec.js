@@ -89,7 +89,7 @@ test.describe('time ledger', () => {
 
     await expect(overlay.locator('.time-entry-row')).toHaveCount(1);
     await expect(overlay.locator('.timesheet-total')).toContainText('2h total');
-    await expect(overlay.locator('.timesheet-export')).toBeEnabled();
+    await expect(overlay.locator('.timesheet-export', { hasText: 'Export CSV' })).toBeEnabled();
 
     // Firm scope shows the same entry while Partner A shares full detail.
     await overlay.locator('.timesheet-scope button', { hasText: 'Firm' }).click();
@@ -122,6 +122,56 @@ test.describe('time ledger', () => {
     await expect(overlay).toBeVisible();
     await expect(overlay.locator('.timesheet-matter-filter')).toContainText('Review MSA for Acme Corp');
     await expect(overlay.locator('.time-entry-row')).toHaveCount(1);
+  });
+
+  test('rates value the timesheet and mark-as-billed locks entries', async ({ page }) => {
+    await page.goto('/');
+    await openCard(page, 'Review MSA for Acme Corp');
+    await page.locator('.matter-time-hours').fill('2');
+    await page.locator('.matter-time-narrative').fill('Cap review');
+    await page.locator('.matter-time-add').click();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.focused-card-panel')).toBeHidden();
+
+    await page.locator('.archive-button', { hasText: 'Timesheet' }).click();
+    const overlay = page.locator('.focused-card-panel');
+    await expect(overlay).toBeVisible();
+
+    // Set a member rate; the footer prices the billable hours.
+    await overlay.locator('.timesheet-rates-toggle').click();
+    await overlay
+      .locator('.rates-editor-row', { hasText: 'Partner A' })
+      .locator('input')
+      .fill('250');
+    await expect(overlay.locator('.timesheet-value')).toContainText('£500.00');
+
+    // A client override wins over the member rate.
+    await overlay
+      .locator('.rates-editor-row', { hasText: 'Acme Corp' })
+      .locator('input')
+      .fill('300');
+    await expect(overlay.locator('.timesheet-value')).toContainText('£600.00');
+
+    // Mark the shown entries as billed: row locks, chip appears, delete goes away.
+    await overlay.locator('button', { hasText: 'Mark shown as billed (1)' }).click();
+    const row = overlay.locator('.time-entry-row');
+    await expect(row).toHaveClass(/time-entry-row--billed/);
+    await expect(row.locator('.time-entry-billed-chip')).toBeVisible();
+    await expect(row.locator('[aria-label="Narrative"]')).toBeDisabled();
+    await expect(overlay.locator('button', { hasText: 'Mark shown as billed (0)' })).toBeDisabled();
+
+    // Hide billed removes it from view; unmark restores editability.
+    await overlay.locator('.timesheet-hide-billed input').check();
+    await expect(overlay.locator('.time-entry-row')).toHaveCount(0);
+    await overlay.locator('.timesheet-hide-billed input').uncheck();
+    await row.locator('.time-entry-billed-chip').click();
+    await expect(row.locator('[aria-label="Narrative"]')).toBeEnabled();
+
+    // Rates persist across a reload.
+    await page.keyboard.press('Escape');
+    await page.reload();
+    await page.locator('.archive-button', { hasText: 'Timesheet' }).click();
+    await expect(page.locator('.focused-card-panel .timesheet-value')).toContainText('£600.00');
   });
 
   test('time entries persist across a reload', async ({ page }) => {

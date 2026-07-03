@@ -58,16 +58,14 @@ The `aiContext` field is hand-authored placeholder text and now only a fallback 
 Mission statement (user, July 2026): the tool's primary purpose is giving the individual — and the organisation, subject to the individual's comfort — visibility over productivity; billing timesheets follow as a by-product. Value is explicitly not billable-only: client work, business development, research & writing, product/tech, and training all count, hence the category model. The in-app ledger, capture surfaces, sharing levels, and CSV export are live (see [AGENTS.md, Time Ledger & Timesheets](AGENTS.md#time-ledger--timesheets)). Remaining:
 
 ### 5.1 Billing integration
-Decision on record: keep the export **neutral but Zoho Books-compatible** (the workspace's likely billing system — final choice still open). Next steps, roughly in order:
+Decision on record: keep the export **neutral but Zoho Books-compatible** (the workspace's likely billing system — final choice still open). Mark-as-billed and rates shipped (see Done). Remaining, roughly in order:
 
-- **Mark-as-billed** state on entries so a period can be closed and never double-exported.
-- **Rates** per member (and per client override) so a timesheet can price itself.
 - **Print/PDF timesheet layout** for sending to clients directly.
 - **Zoho Books push** — create invoices/time entries via the connected Zoho Books account instead of CSV, once the backend and the billing decision land.
 
 ### 5.2 Productivity depth
 - Weekly/monthly trends (this week vs last), per-category over time.
-- "Unaccounted time" nudges — the assistant notices gaps between board activity and logged hours and prompts.
+- **Activity-based** unaccounted-time nudges ("you moved three cards on Tuesday but logged nothing") — needs actor attribution on history events, i.e. a real user model. The weekday-gap version shipped (see Done).
 - Live timer capture (deliberately deferred from v1).
 - Configurable categories (they are a constant today).
 
@@ -86,7 +84,7 @@ The 7-day Waiting-Response status check is live in-app (see [AGENTS.md, Status C
 ## 7. Quality & Verification
 
 ### 7.1 UI component tests
-Vitest covers the pure helpers (96 tests); Playwright covers the real flows in-browser (31 tests). The middle layer — component tests with `@testing-library/react` — is still absent. Worth adding if overlay orchestration logic in `App.jsx` keeps growing.
+Vitest covers the pure helpers (106 tests); Playwright covers the real flows in-browser (32 tests). The middle layer — component tests with `@testing-library/react` — is still absent. Worth adding if overlay orchestration logic in `App.jsx` keeps growing.
 
 ### 7.2 CI
 No CI pipeline runs the suites yet. `npm run lint && npm test && npm run build && npm run test:e2e` is the full gate; wire it into GitHub Actions. Note the Playwright browser-build caveat in [AGENTS.md, Verification](AGENTS.md#verification).
@@ -103,6 +101,9 @@ These are settled and live in the code today. Listed here so future agents do no
 - **Sharing levels** per member — `full` (the decided default) / `totals` / `private` — enforced in the Firm scope of the Timesheet overlay, with private members counted rather than silently omitted.
 - **Timesheet overlay** (header button, My time panel, or matter footer): Me/Firm scope, period presets, group by date/matter/client/category, inline edit/delete, billable toggles, and CSV export with Zoho Books-mappable columns. Decided: neutral CSV now, shaped for a Zoho Books integration later.
 - **My time panel** in My Command Centre: week strip of category-stacked daily bars (validated categorical palette, `--cat-*` tokens), weekly total, billable split.
+- **Rates & value** *(July 2026)*: hourly rate per member with per-client overrides (override wins) and a currency symbol, edited in the overlay's Rates panel. Billable entries are priced; unrated hours are reported, never silently zeroed. CSV gained Rate/Amount/Billed At columns.
+- **Mark-as-billed** *(July 2026)*: "Mark shown as billed" stamps `billedAt` on visible unbilled entries; billed rows lock with an unmark chip; "Hide billed" filters them out. Closing a period can no longer double-export.
+- **Unaccounted-time nudges** *(July 2026)*: weekdays this week with zero logged hours surface in the My time panel and the assistant's weekly summary.
 
 **Status check workflow (7-day Waiting Response watchdog)** *(new)*
 

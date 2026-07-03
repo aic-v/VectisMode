@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Download, Timer, Users, User, X } from 'lucide-react';
-import { TEAM_MEMBERS } from './board.js';
+import { BadgePoundSterling, CheckCheck, Download, Timer, Users, User, X } from 'lucide-react';
+import { CLIENTS, TEAM_MEMBERS } from './board.js';
 import {
   WORK_CATEGORIES,
   applyShareLevels,
@@ -8,9 +8,11 @@ import {
   categoryLabel,
   entriesToCsv,
   filterEntries,
+  formatMoney,
   isoDate,
   startOfWeek,
   sumHours,
+  valueOfEntries,
 } from './time.js';
 
 const PERIODS = [
@@ -87,8 +89,9 @@ function downloadCsv(csv, filename) {
 }
 
 function EntryRow({ entry, onUpdateEntry, onRemoveEntry }) {
+  const isBilled = Boolean(entry.billedAt);
   return (
-    <li className="time-entry-row">
+    <li className={`time-entry-row ${isBilled ? 'time-entry-row--billed' : ''}`}>
       <span className="time-entry-date">{entry.date}</span>
       <span className="time-entry-member">{memberName(entry.memberId)}</span>
       <span className="time-entry-matter">
@@ -104,6 +107,7 @@ function EntryRow({ entry, onUpdateEntry, onRemoveEntry }) {
         aria-label="Narrative"
         value={entry.narrative}
         placeholder="Add narrative"
+        disabled={isBilled}
         onChange={(event) => onUpdateEntry(entry.id, { narrative: event.target.value })}
       />
       <input
@@ -113,25 +117,106 @@ function EntryRow({ entry, onUpdateEntry, onRemoveEntry }) {
         min="0.1"
         step="0.1"
         value={entry.hours}
+        disabled={isBilled}
         onChange={(event) => onUpdateEntry(entry.id, { hours: Number(event.target.value) })}
       />
       <label className="time-entry-billable" title="Billable">
         <input
           type="checkbox"
           checked={entry.billable}
+          disabled={isBilled}
           onChange={(event) => onUpdateEntry(entry.id, { billable: event.target.checked })}
         />
         <span>Billable</span>
       </label>
-      <button
-        type="button"
-        className="icon-button time-entry-delete"
-        aria-label="Delete time entry"
-        onClick={() => onRemoveEntry(entry.id)}
-      >
-        <X size={15} />
-      </button>
+      {isBilled ? (
+        <button
+          type="button"
+          className="time-entry-billed-chip"
+          title={`Billed ${isoDate(entry.billedAt) ?? ''} — click to unmark`}
+          onClick={() => onUpdateEntry(entry.id, { billedAt: null })}
+        >
+          Billed
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="icon-button time-entry-delete"
+          aria-label="Delete time entry"
+          onClick={() => onRemoveEntry(entry.id)}
+        >
+          <X size={15} />
+        </button>
+      )}
     </li>
+  );
+}
+
+function RatesEditor({ rates, onRatesChange }) {
+  const setNumber = (group, key) => (event) => {
+    const value = Number(event.target.value);
+    const nextGroup = { ...rates[group] };
+    if (Number.isFinite(value) && value > 0) {
+      nextGroup[key] = value;
+    } else {
+      delete nextGroup[key];
+    }
+    onRatesChange({ ...rates, [group]: nextGroup });
+  };
+
+  return (
+    <div className="rates-editor" aria-label="Hourly rates">
+      <div className="rates-editor-row rates-editor-currency">
+        <span className="details-section-label">Currency</span>
+        <input
+          className="form-input rates-input"
+          aria-label="Currency symbol"
+          value={rates.currency}
+          maxLength={3}
+          onChange={(event) => onRatesChange({ ...rates, currency: event.target.value || '£' })}
+        />
+      </div>
+      <div className="rates-editor-grid">
+        <div>
+          <div className="details-section-label">Hourly rate per member</div>
+          {TEAM_MEMBERS.map(({ id, name }) => (
+            <label key={id} className="rates-editor-row">
+              <span>{name}</span>
+              <input
+                className="form-input rates-input"
+                type="number"
+                min="0"
+                step="5"
+                placeholder="—"
+                value={rates.members[id] ?? ''}
+                onChange={setNumber('members', id)}
+              />
+            </label>
+          ))}
+        </div>
+        <div>
+          <div className="details-section-label">Client overrides (win over member rates)</div>
+          {CLIENTS.map((client) => (
+            <label key={client} className="rates-editor-row">
+              <span>{client}</span>
+              <input
+                className="form-input rates-input"
+                type="number"
+                min="0"
+                step="5"
+                placeholder="—"
+                value={rates.clients[client] ?? ''}
+                onChange={setNumber('clients', client)}
+              />
+            </label>
+          ))}
+        </div>
+      </div>
+      <p className="rates-editor-note">
+        Rates price billable entries only. Entries without a matching rate show as
+        “unrated” instead of being valued at zero.
+      </p>
+    </div>
   );
 }
 
@@ -152,6 +237,9 @@ export default function TimesheetOverlay({
   shareLevelFor,
   initialCardId,
   cardTitle,
+  rates,
+  onRatesChange,
+  onMarkBilled,
   onClose,
   onUpdateEntry,
   onRemoveEntry,
@@ -162,6 +250,8 @@ export default function TimesheetOverlay({
   const [period, setPeriod] = useState('week');
   const [groupBy, setGroupBy] = useState('date');
   const [matterOnly, setMatterOnly] = useState(Boolean(initialCardId));
+  const [hideBilled, setHideBilled] = useState(false);
+  const [ratesOpen, setRatesOpen] = useState(false);
 
   const closeOverlay = useCallback(() => {
     setExpanded(false);
@@ -201,13 +291,19 @@ export default function TimesheetOverlay({
     privateMemberCount = shared.privateMemberCount;
   }
 
+  if (hideBilled) {
+    base = base.filter((entry) => !entry.billedAt);
+  }
+
   const groups = groupEntries(base, groupBy);
   const split = billableSplit(base);
   const grandTotal =
     Math.round((split.total + totalsOnly.reduce((sum, t) => sum + t.hours, 0)) * 100) / 100;
+  const value = valueOfEntries(base, rates);
+  const unbilledIds = base.filter((entry) => !entry.billedAt).map((entry) => entry.id);
 
   const exportCsv = () => {
-    const csv = entriesToCsv(base, { memberName });
+    const csv = entriesToCsv(base, { memberName, rates });
     const stamp = isoDate(now);
     downloadCsv(csv, `vectis-timesheet-${scope}-${period}-${stamp}.csv`);
   };
@@ -290,11 +386,43 @@ export default function TimesheetOverlay({
               </label>
             ) : null}
 
+            <label className="timesheet-filter timesheet-hide-billed">
+              <input
+                type="checkbox"
+                checked={hideBilled}
+                onChange={(event) => setHideBilled(event.target.checked)}
+              />
+              <span>Hide billed</span>
+            </label>
+
+            <button
+              type="button"
+              className={`timesheet-export timesheet-rates-toggle ${ratesOpen ? 'is-active' : ''}`}
+              aria-pressed={ratesOpen}
+              onClick={() => setRatesOpen((open) => !open)}
+            >
+              <BadgePoundSterling size={14} />
+              Rates
+            </button>
+
+            <button
+              type="button"
+              className="timesheet-export"
+              onClick={() => onMarkBilled(unbilledIds)}
+              disabled={unbilledIds.length === 0}
+              title="Stamp every entry shown as billed so it cannot be double-exported"
+            >
+              <CheckCheck size={14} />
+              Mark shown as billed ({unbilledIds.length})
+            </button>
+
             <button type="button" className="timesheet-export" onClick={exportCsv} disabled={base.length === 0}>
               <Download size={14} />
               Export CSV
             </button>
           </div>
+
+          {ratesOpen ? <RatesEditor rates={rates} onRatesChange={onRatesChange} /> : null}
 
           {groups.length === 0 && totalsOnly.length === 0 ? (
             <div className="details-section archive-empty">
@@ -357,6 +485,14 @@ export default function TimesheetOverlay({
               {grandTotal}h total
             </span>
             <span className="timesheet-billable">{split.billablePct}% billable</span>
+            {value.ratedHours > 0 ? (
+              <span className="timesheet-value">
+                {formatMoney(value.amount, rates.currency)}
+                {value.unratedHours > 0 ? (
+                  <em> +{value.unratedHours}h unrated</em>
+                ) : null}
+              </span>
+            ) : null}
             <span className="timesheet-legend">
               {WORK_CATEGORIES.map(({ key, label }) => (
                 <span key={key} className="timesheet-legend-item">

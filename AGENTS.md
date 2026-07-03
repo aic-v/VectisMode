@@ -140,7 +140,13 @@ Time is a **global ledger** ([src/time.js](src/time.js)), not card data — beca
 
 **Sharing levels** (`SHARE_LEVELS`, picked per member in the My Command Centre toolbar, stored in `vectis:sharing:v1`): `full` (default — org sees entries) · `totals` (org sees only aggregate hours) · `private` (excluded, but counted so firm views say "N members private" rather than under-reporting silently). `applyShareLevels` enforces this in the Firm scope; the Me scope always shows the member their own detail.
 
-**Surfaces:** the **My time panel** in My Command Centre (week strip of category-stacked bars, total + billable %, legend) and the **Timesheet overlay** ([src/Timesheets.jsx](src/Timesheets.jsx)) reachable from the fixed header button, the My time panel, or a matter footer — Me/Firm scope, period presets, grouping by date/matter/client/category, inline narrative/hours/billable editing, delete, and **Export CSV** with Zoho Books-mappable columns (`Date, User, Client, Matter, Category, Notes, Hours, Billable Status`). Decision on record: export stays neutral CSV, shaped for a later Zoho Books integration.
+**Surfaces:** the **My time panel** in My Command Centre (week strip of category-stacked bars, total + billable %, legend, and an unaccounted-time nudge listing weekdays with nothing logged) and the **Timesheet overlay** ([src/Timesheets.jsx](src/Timesheets.jsx)) reachable from the fixed header button, the My time panel, or a matter footer — Me/Firm scope, period presets, grouping by date/matter/client/category, inline narrative/hours/billable editing, delete, and **Export CSV** with Zoho Books-mappable columns (`Date, User, Client, Matter, Category, Notes, Hours, Billable Status, Rate, Amount, Billed At`). Decision on record: export stays neutral CSV, shaped for a later Zoho Books integration.
+
+**Rates** (`vectis:rates:v1`, edited in the overlay's Rates panel): an hourly rate per member plus per-client overrides that win when both apply, and a currency symbol (default `£`). `valueOfEntries` prices billable entries only and reports unrated hours separately — a missing rate is visible, never silently zero. The overlay footer shows the priced value; the CSV carries Rate/Amount columns.
+
+**Mark-as-billed:** "Mark shown as billed" stamps `billedAt` on every visible unbilled entry so a closed period can never be double-exported. Billed rows lock (inputs disabled, delete hidden) and show a `Billed` chip — clicking the chip unmarks. A "Hide billed" filter excludes them from view and export.
+
+**Nudges:** `unloggedWeekdays` finds Mon–Fri days this week (before today) with zero logged hours for the member; the My time panel and the assistant's weekly time summary both surface them. Activity-based nudges ("you moved cards but logged nothing") need actor attribution on history events — deferred until a real user model exists.
 
 ## Persistence
 
@@ -151,6 +157,7 @@ Stopgap, single-browser persistence via versioned localStorage keys in [src/stor
 - `vectis:chat:v1` — assistant chat history.
 - `vectis:time:v1` — the time ledger; entries are validated individually on load so one corrupt entry drops out without discarding the ledger.
 - `vectis:sharing:v1` — per-member time-sharing levels.
+- `vectis:rates:v1` — hourly rates (per member + per-client overrides) and currency.
 
 Bump a key's version to invalidate stored state after a schema change. Real backend persistence is still an open decision — [roadmap 2.1](roadmap.md#21-backend-persistence).
 
@@ -185,7 +192,7 @@ These are facts about today's code. The plan to address each lives in [roadmap.m
 3. The assistant chat is a local rules engine, not a real agent; `aiContext` remains hand-authored placeholder text.
 4. "Notify users and manager" for status checks means in-app surfacing only — no email/push.
 5. "My matters" relies on the free-text `owner` field matching the member name.
-6. Timesheets have no rates, no mark-as-billed state, and no invoice push — CSV export only.
+6. Timesheets have no invoice push — CSV export only (rates and mark-as-billed exist; the Zoho Books integration is the missing last mile).
 7. No component-level tests (`@testing-library/react`); coverage is pure helpers + browser E2E.
 8. No CI pipeline.
 
@@ -195,9 +202,9 @@ Known-green commands:
 
 ```bash
 npm run lint
-npm test          # Vitest, 96 tests
+npm test          # Vitest, 106 tests
 npm run build
-npm run test:e2e  # Playwright, 31 tests (starts its own dev server)
+npm run test:e2e  # Playwright, 32 tests (starts its own dev server)
 ```
 
 Playwright launches the `chromium` project. If the exact Playwright browser build is not downloaded (e.g. sandboxed environments with a pre-installed browser), point it at a system Chromium:

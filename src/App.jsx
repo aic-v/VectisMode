@@ -62,9 +62,11 @@ import {
   SHARING_STORAGE_KEY,
   loadBoard,
   loadJSON,
+  loadRates,
   loadTimeEntries,
   saveBoard,
   saveJSON,
+  saveRates,
   saveTimeEntries,
 } from './storage.js';
 import {
@@ -75,6 +77,7 @@ import {
   categoryLabel,
   filterEntries,
   isoDate,
+  markEntriesBilled,
   removeTimeEntry,
   sumHours,
   updateTimeEntry,
@@ -1147,6 +1150,7 @@ export default function App() {
   const [pendingStatusChange, setPendingStatusChange] = useState(null);
   const [timeEntries, setTimeEntries] = useState(() => loadTimeEntries() ?? []);
   const [sharing, setSharing] = useState(() => loadJSON(SHARING_STORAGE_KEY) ?? {});
+  const [rates, setRates] = useState(loadRates);
   const [timesheetView, setTimesheetView] = useState(null);
 
   useEffect(() => {
@@ -1156,6 +1160,10 @@ export default function App() {
   useEffect(() => {
     saveJSON(SHARING_STORAGE_KEY, sharing);
   }, [sharing]);
+
+  useEffect(() => {
+    saveRates(rates);
+  }, [rates]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -1311,6 +1319,11 @@ export default function App() {
 
   const handleRemoveTimeEntry = useCallback((id) => {
     setTimeEntries((prev) => removeTimeEntry(prev, id));
+  }, []);
+
+  const handleMarkBilled = useCallback((ids) => {
+    const now = new Date().toISOString();
+    setTimeEntries((prev) => markEntriesBilled(prev, ids, { now }));
   }, []);
 
   const shareLevelFor = useCallback(
@@ -1538,6 +1551,9 @@ export default function App() {
           shareLevelFor={shareLevelFor}
           initialCardId={timesheetView.cardId}
           cardTitle={timesheetView.cardId ? findCard(items, timesheetView.cardId)?.title : null}
+          rates={rates}
+          onRatesChange={setRates}
+          onMarkBilled={handleMarkBilled}
           onClose={() => setTimesheetView(null)}
           onUpdateEntry={handleUpdateTimeEntry}
           onRemoveEntry={handleRemoveTimeEntry}

@@ -3,13 +3,14 @@
 // versioned so a future schema change can invalidate stale state cleanly.
 
 import { COLUMN_TITLES } from './board.js';
-import { normalizeTimeEntry } from './time.js';
+import { normalizeRates, normalizeTimeEntry } from './time.js';
 
 export const BOARD_STORAGE_KEY = 'vectis:board:v1';
 export const IDENTITY_STORAGE_KEY = 'vectis:identity:v1';
 export const CHAT_STORAGE_KEY = 'vectis:chat:v1';
 export const TIME_STORAGE_KEY = 'vectis:time:v1';
 export const SHARING_STORAGE_KEY = 'vectis:sharing:v1';
+export const RATES_STORAGE_KEY = 'vectis:rates:v1';
 
 const BOARD_COLUMN_KEYS = Object.keys(COLUMN_TITLES);
 
@@ -74,4 +75,12 @@ export function loadTimeEntries() {
 
 export function saveTimeEntries(entries) {
   saveJSON(TIME_STORAGE_KEY, entries);
+}
+
+export function loadRates() {
+  return normalizeRates(loadJSON(RATES_STORAGE_KEY));
+}
+
+export function saveRates(rates) {
+  saveJSON(RATES_STORAGE_KEY, rates);
 }
