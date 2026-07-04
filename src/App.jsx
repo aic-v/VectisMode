@@ -84,6 +84,7 @@ import {
 } from './time.js';
 import MyCommandCentre from './MyCommandCentre.jsx';
 import TimesheetOverlay from './Timesheets.jsx';
+import useRemoteSync from './useRemoteSync.js';
 
 const STATUS_META = {
   'Not Started': { Icon: Circle },
@@ -1164,6 +1165,18 @@ export default function App() {
   useEffect(() => {
     saveRates(rates);
   }, [rates]);
+
+  // Supabase two-way sync — a no-op unless VITE_SUPABASE_* env vars are set.
+  useRemoteSync({
+    items,
+    setItems,
+    timeEntries,
+    setTimeEntries,
+    rates,
+    setRates,
+    sharing,
+    setSharing,
+  });
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),

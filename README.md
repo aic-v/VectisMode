@@ -11,6 +11,8 @@ npm run dev -- --host 127.0.0.1
 
 Local URL: `http://127.0.0.1:5173/` (Vite will fall back to `5174` if the port is taken).
 
+Without configuration the app persists to this browser's localStorage. For multi-device sync, apply [supabase/migrations/0001_init.sql](supabase/migrations/0001_init.sql) to a Supabase project and copy [.env.example](.env.example) to `.env.local` with the project's URL and publishable key.
+
 ## Scripts
 
 ```bash
@@ -47,7 +49,7 @@ npm run preview   # preview the production build
 - **My Command Centre.** The bottom-left toggle switches to a personal view: your week's time as category-stacked bars, status-check alerts, a due-date agenda and month calendar, and the Vectis Assistant chat (answers generated locally for now).
 - **Time is a ledger, not a chore.** Hours are captured where work happens — the work-log form, a quick-add row on every matter, or by telling the assistant "log 1.5h on the Acme MSA". Entries carry a work category (client work, business development, research, product, training, admin) because value isn't billable-only.
 - **Timesheets fall out for free.** The Timesheet overlay filters by period, groups by matter/client/category, respects each member's sharing level (full detail / totals only / private — full is the default), and exports a Zoho Books-mappable CSV.
-- **State survives refresh.** Board, identity, chat, time entries, and sharing levels persist to localStorage; a real backend is still on the roadmap.
+- **State survives refresh — and syncs.** Everything persists to localStorage, and when Supabase env vars are set, the board and ledger sync across devices in realtime (auth and database-enforced sharing are the next step).
 
 ## Where to go next
 

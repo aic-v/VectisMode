@@ -25,10 +25,14 @@ A per-card `history[]` log is appended on every status and column change and ren
 
 ## 2. State, Persistence & Data Model
 
-### 2.1 Backend persistence
-Board state, identity, and chat history now survive refresh via versioned localStorage keys ([src/storage.js](src/storage.js)) — but that is a single-browser stopgap. A real backend is still needed for multi-user/multi-device use, and none is chosen yet **(decision pending)**. Likely candidates: Supabase, Firebase, or a small custom API.
+### 2.1 Backend persistence — Supabase (decided July 2026)
+**Decided: Supabase**, chosen for Postgres/SQL reporting, Row-Level Security mapping onto the sharing consent model, built-in auth, realtime, and self-host portability. The integration is live and env-gated (see [AGENTS.md, Persistence](AGENTS.md#persistence)); schema in [supabase/migrations/0001_init.sql](supabase/migrations/0001_init.sql). Remaining:
 
-The swap is designed to be cheap: `loadBoard()`/`saveBoard()` in `storage.js` are the only seam, and the stored shape (`columns` → `cards` with `status`, `previousStatus`, `previousColumn`, `waitingSince`, `statusCheckAt`, `workLog[]`, `history[]`) is already the right data model. Card position/order is stored explicitly in the column arrays.
+- **Apply the migration** to the project and set `.env.local` (the sandbox that built this cannot reach supabase.co, so first-run verification happens on a real machine).
+- **Supabase Auth** — email/SSO login replaces the "Viewing as" picker, gives real attribution, and unlocks the manager role. Decision needed: magic-link email vs Google/Microsoft SSO.
+- **Real RLS policies** — replace the temporary permissive pre-auth policies with the auth-based sharing enforcement sketched in the migration. Until then sharing is a client-side contract.
+- **Offline queue / conflict handling** — v1 sync is last-write-wins with a debounced document push for the board; fine for a four-person team, revisit if edits collide in practice.
+- **Split cards into rows** eventually, if per-card RLS or per-card history queries are needed; the ledger is already relational.
 
 ### 2.2 Real navigation targets for details-view links
 `Time entries` is now an in-app button (it opens the Timesheet overlay scoped to the matter — time-tracking lives in this tool). `Task folder` still opens the card's `taskFolderUrl` in a new tab, and the sample data points at a placeholder `files.vectis.law` host — swap for the real document system once chosen **(decision pending: which system)**.

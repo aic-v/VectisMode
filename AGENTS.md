@@ -32,7 +32,8 @@ The `Vectis Law Command Center` label is a small fixed element in the bottom-rig
 - [src/time.js](src/time.js) — the time ledger: work categories, entry validation, filters/totals/week buckets, sharing-level enforcement, and the Zoho-mappable CSV export. Pure module — see [Time Ledger & Timesheets](#time-ledger--timesheets).
 - [src/Timesheets.jsx](src/Timesheets.jsx) — the Timesheet overlay: Me/Firm scope, period + grouping filters, inline entry editing, CSV download.
 - [src/agent.js](src/agent.js) — the Vectis Assistant. `getAgentReply` is the seam for a future real agent endpoint; today it answers with local rules over the live board and ledger, and parses `log …` commands (its first write capability). Also holds due-date parsing/classification and the "my matters" heuristic.
-- [src/storage.js](src/storage.js) — versioned localStorage persistence (board, identity, chat, time entries, sharing levels) with shape validation.
+- [src/storage.js](src/storage.js) — versioned localStorage persistence (board, identity, chat, time entries, sharing levels, rates) with shape validation.
+- [src/remote.js](src/remote.js) / [src/useRemoteSync.js](src/useRemoteSync.js) — env-gated Supabase sync (see [Persistence](#persistence)); [supabase/migrations](supabase/migrations) holds the schema.
 - [src/index.css](src/index.css) — design tokens (including the validated work-category palette), layout, projection/flip animations, status-check, My Command Centre, and timesheet styles, responsive rules.
 - [src/board.test.js](src/board.test.js), [src/time.test.js](src/time.test.js), [src/storage.test.js](src/storage.test.js), [src/agent.test.js](src/agent.test.js) — Vitest suites (96 tests).
 - [e2e/](e2e/) — Playwright suites (31 tests) with shared helpers in [e2e/helpers.js](e2e/helpers.js), configured by [playwright.config.js](playwright.config.js).
@@ -150,7 +151,20 @@ Time is a **global ledger** ([src/time.js](src/time.js)), not card data — beca
 
 ## Persistence
 
-Stopgap, single-browser persistence via versioned localStorage keys in [src/storage.js](src/storage.js):
+Two layers: localStorage always (cache + offline fallback), and an **env-gated Supabase remote** for multi-device sync.
+
+### Remote (Supabase)
+
+Configured by `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` in `.env.local` (see [.env.example](.env.example)); without them the app is local-only, which is also how every test suite runs. The schema lives in [supabase/migrations/0001_init.sql](supabase/migrations/0001_init.sql) — apply it via the Supabase SQL editor.
+
+- **Model:** the board is one JSONB document per workspace (`boards.state` — cards are heavily interlinked, so document sync first); `time_entries`, `rates`, and `sharing_levels` are relational rows because the ledger is the sensitive, reportable data.
+- **Sync** ([src/remote.js](src/remote.js) + [src/useRemoteSync.js](src/useRemoteSync.js)): remote wins on load; after hydration, local changes write through (board debounced as a document, ledger as a diffed change-set, rates/sharing as upserts with echo guards). Realtime subscriptions apply other clients' changes live; our own board echoes are filtered by a per-session `CLIENT_ID`. Every IO helper swallows errors with a `console.warn` — remote failure never breaks local UX. Conflict strategy is last-write-wins (v1).
+- **RLS:** enabled on all tables with **temporary permissive pre-auth policies** — the consent model stays client-enforced until Supabase Auth ships (auth-phase policy sketch at the bottom of the migration). Do not treat sharing levels as a security boundary yet.
+- Never put the service-role key or database password in env files or the repo — the publishable key only.
+
+### Local (localStorage)
+
+Versioned keys in [src/storage.js](src/storage.js):
 
 - `vectis:board:v1` — the full `items` object, saved on every change, validated with `isValidBoard` on load (bad/missing data falls back to `INITIAL_ITEMS`).
 - `vectis:identity:v1` — the My Command Centre identity.
@@ -159,7 +173,7 @@ Stopgap, single-browser persistence via versioned localStorage keys in [src/stor
 - `vectis:sharing:v1` — per-member time-sharing levels.
 - `vectis:rates:v1` — hourly rates (per member + per-client overrides) and currency.
 
-Bump a key's version to invalidate stored state after a schema change. Real backend persistence is still an open decision — [roadmap 2.1](roadmap.md#21-backend-persistence).
+Bump a key's version to invalidate stored state after a schema change.
 
 ## Archive
 
@@ -187,8 +201,8 @@ Mechanics:
 
 These are facts about today's code. The plan to address each lives in [roadmap.md](roadmap.md).
 
-1. Persistence is single-browser localStorage — no backend, no multi-user sync (which also means the Firm timesheet scope only aggregates this browser's ledger).
-2. Team columns are hardcoded via `TEAM_MEMBERS`; no dynamic roster, no manager role (status-check resolution is not permission-gated, and sharing levels are set per browser, not per authenticated user).
+1. Supabase sync exists but has no auth — anyone with the app URL and publishable key reads/writes everything (permissive pre-auth RLS). Sharing levels are a client-side contract until Auth + real RLS land. Sync is last-write-wins with no offline queue.
+2. Team columns are hardcoded via `TEAM_MEMBERS`; no dynamic roster, no manager role (status-check resolution is not permission-gated, and identity is a picker, not a login).
 3. The assistant chat is a local rules engine, not a real agent; `aiContext` remains hand-authored placeholder text.
 4. "Notify users and manager" for status checks means in-app surfacing only — no email/push.
 5. "My matters" relies on the free-text `owner` field matching the member name.
