@@ -45,6 +45,13 @@ green), documented, and pushed to branch
 - **Supabase integration** (env-gated): schema in
   `supabase/migrations/0001_init.sql`, sync layer in `src/remote.js` +
   `src/useRemoteSync.js`. Local-only without env vars.
+- **Google Workspace SSO + auth-phase RLS** (env-gated, added on branch
+  `claude/auth-setup-pr-review-4usk44`, stacked on PR #4): login gate
+  (`src/useAuth.js` + `src/AuthGate.jsx`), member/role resolution
+  (`src/auth.js`), shared client (`src/supabaseClient.js`), manager-only
+  view-as, actor stamping on history/work-log/time, and the real RLS in
+  `supabase/migrations/0002_auth.sql`. See AGENTS.md → Authentication.
+  **Not yet verified live** — the sandbox can't reach supabase.co.
 
 ## Supabase project (created, NOT yet verified end-to-end)
 
@@ -63,22 +70,27 @@ green), documented, and pushed to branch
 
 ## Pending user actions (nag politely if still open)
 
-1. Apply `supabase/migrations/0001_init.sql` in the Supabase SQL editor.
+1. Apply `supabase/migrations/0001_init.sql` in the Supabase SQL editor. ✅ done.
 2. Create `.env.local` on his machine and confirm live sync works.
 3. Rotate the database password.
-4. Decide the auth method: magic-link email vs Google/Microsoft SSO.
+4. Decide the auth method. ✅ **Google Workspace SSO** (built — see below).
 5. Review/merge PR #4.
+6. **New — for the auth build:** edit the roster emails in
+   `supabase/migrations/0002_auth.sql`, apply it after 0001, create a Google
+   OAuth client (Cloud console → Internal consent screen → Web client, redirect
+   `<project>.supabase.co/auth/v1/callback`), and enable the Google provider in
+   Supabase → Authentication → Providers.
 
 ## Next build work, in priority order
 
-1. **Supabase Auth + real RLS** (blocked on decision 4 above). Replace the
-   "Viewing as" picker with real login; map members to auth users; activate
-   the auth-phase policies sketched at the bottom of the migration so the
-   sharing tiers (full/totals/private, default full) are database-enforced;
-   stamp actors on history events and work logs. This unlocks the manager
-   role and activity-based nudges.
-2. **Verify live sync end-to-end** on a real network (this cannot be done
-   from a sandbox whose network policy blocks supabase.co — check
+1. **Supabase Auth + real RLS — BUILT (Google SSO), verify live.** Login gate,
+   manager-only view-as, actor stamping, and database-enforced consent tiers
+   are all implemented (`src/auth.js`, `src/useAuth.js`, `src/AuthGate.jsx`,
+   `supabase/migrations/0002_auth.sql`). Remaining: verify the OAuth flow and
+   RLS end-to-end on a real network, then wire activity-based nudges on the new
+   actor data.
+2. **Verify live sync + auth end-to-end** on a real network (this cannot be
+   done from a sandbox whose network policy blocks supabase.co — check
    `curl -sS "$HTTPS_PROXY/__agentproxy/status"` before wasting time).
 3. **Real agent endpoint** — replace the body of `getAgentReply` in
    `src/agent.js` (keep the signature: returns `{ text, timeEntry }`). A

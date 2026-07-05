@@ -28,9 +28,9 @@ A per-card `history[]` log is appended on every status and column change and ren
 ### 2.1 Backend persistence — Supabase (decided July 2026)
 **Decided: Supabase**, chosen for Postgres/SQL reporting, Row-Level Security mapping onto the sharing consent model, built-in auth, realtime, and self-host portability. The integration is live and env-gated (see [AGENTS.md, Persistence](AGENTS.md#persistence)); schema in [supabase/migrations/0001_init.sql](supabase/migrations/0001_init.sql). Remaining:
 
-- **Apply the migration** to the project and set `.env.local` (the sandbox that built this cannot reach supabase.co, so first-run verification happens on a real machine).
-- **Supabase Auth** — email/SSO login replaces the "Viewing as" picker, gives real attribution, and unlocks the manager role. Decision needed: magic-link email vs Google/Microsoft SSO.
-- **Real RLS policies** — replace the temporary permissive pre-auth policies with the auth-based sharing enforcement sketched in the migration. Until then sharing is a client-side contract.
+- **Apply the migrations** to the project (`0001_init.sql`, then `0002_auth.sql`) and set `.env.local` (the sandbox that built this cannot reach supabase.co, so first-run verification happens on a real machine).
+- **Supabase Auth — Google Workspace SSO (decided July 2026), built.** Replaces the "Viewing as" picker with a real login, stamps actors on history/work-log/time entries, and introduces the manager role. Code in [src/auth.js](src/auth.js)/[src/useAuth.js](src/useAuth.js)/[src/AuthGate.jsx](src/AuthGate.jsx); see [AGENTS.md, Authentication](AGENTS.md#authentication). Remaining: verify the live OAuth flow on a real network, and register the Google OAuth client + fill the roster emails in `0002_auth.sql`.
+- **Real RLS policies — built** in [supabase/migrations/0002_auth.sql](supabase/migrations/0002_auth.sql): the auth-based policies enforce the full/totals/private consent tiers in the database (own + full-shared detail readable, totals via a SECURITY DEFINER view, private hidden; owner-only writes; manager-only rates). Replaces the pre-auth permissive policies once applied. Still to verify live end-to-end.
 - **Offline queue / conflict handling** — v1 sync is last-write-wins with a debounced document push for the board; fine for a four-person team, revisit if edits collide in practice.
 - **Split cards into rows** eventually, if per-card RLS or per-card history queries are needed; the ledger is already relational.
 
@@ -47,7 +47,7 @@ The toggle now renders a real personalised view (day planner + agent chat — se
 - More personal widgets — matters recently touched, upcoming filing deadlines. (The time-logged-this-week widget shipped as the My time panel.)
 
 ### 3.2 Dynamic team roster
-The four team columns are hardcoded, now via the `TEAM_MEMBERS` constant in [src/board.js](src/board.js) (id + name). Drive this from a real team list once a backend exists, and add a **manager** role — the status-check workflow wants manager-only actions eventually.
+The four team columns are still a fixed roster, seeded in the `members` table (and mirrored by `TEAM_MEMBERS` in [src/board.js](src/board.js)). The **manager** role now exists (see [AGENTS.md, Authentication](AGENTS.md#authentication)): the manager can view-as other members and is the only one RLS lets write rates. Still to do: drive the roster from the `members` table dynamically (self-service onboarding of a new Workspace user into a free slot / new column), and gate manager-only *actions* in the UI — notably status-check resolution, which is still open to anyone (see [6. Status Check Workflow](#6-status-check-workflow--matter-nudges)).
 
 ## 4. AI Integration
 

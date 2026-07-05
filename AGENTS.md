@@ -34,6 +34,8 @@ The `Vectis Law Command Center` label is a small fixed element in the bottom-rig
 - [src/agent.js](src/agent.js) — the Vectis Assistant. `getAgentReply` is the seam for a future real agent endpoint; today it answers with local rules over the live board and ledger, and parses `log …` commands (its first write capability). Also holds due-date parsing/classification and the "my matters" heuristic.
 - [src/storage.js](src/storage.js) — versioned localStorage persistence (board, identity, chat, time entries, sharing levels, rates) with shape validation.
 - [src/remote.js](src/remote.js) / [src/useRemoteSync.js](src/useRemoteSync.js) — env-gated Supabase sync (see [Persistence](#persistence)); [supabase/migrations](supabase/migrations) holds the schema.
+- [src/supabaseClient.js](src/supabaseClient.js) — the single env-gated Supabase client, shared by the data and auth layers.
+- [src/auth.js](src/auth.js) / [src/useAuth.js](src/useAuth.js) / [src/AuthGate.jsx](src/AuthGate.jsx) — Google Workspace SSO: sign-in/out, member resolution from the `members` table, and the pre-board login/loading/no-access screens. See [Authentication](#authentication).
 - [src/index.css](src/index.css) — design tokens (including the validated work-category palette), layout, projection/flip animations, status-check, My Command Centre, and timesheet styles, responsive rules.
 - [src/board.test.js](src/board.test.js), [src/time.test.js](src/time.test.js), [src/storage.test.js](src/storage.test.js), [src/agent.test.js](src/agent.test.js) — Vitest suites (96 tests).
 - [e2e/](e2e/) — Playwright suites (31 tests) with shared helpers in [e2e/helpers.js](e2e/helpers.js), configured by [playwright.config.js](playwright.config.js).
@@ -118,7 +120,7 @@ The 7-day Waiting-Response watchdog (roadmap item now shipped; remaining work in
 
 `commandMode === 'mine'` replaces the board with [src/MyCommandCentre.jsx](src/MyCommandCentre.jsx): a "Sharing" + "Viewing as" toolbar, the full-width **My time** week strip, then a two-column grid (day planner left, agent chat right).
 
-- **Identity** — a select over `TEAM_MEMBERS` ([src/board.js](src/board.js)), persisted to localStorage. "My matters" = the member's column plus cards in `waiting`/`available` whose `owner` matches the member name (heuristic until an assignee model exists — [roadmap 1.3](roadmap.md#13-assignee-model)).
+- **Identity** — in local-only mode, a select over `TEAM_MEMBERS` ([src/board.js](src/board.js)) persisted to localStorage. When Supabase Auth is configured (see [Authentication](#authentication)), the signed-in member is the identity and the "Viewing as" picker is manager-only. "My matters" = the member's column plus cards in `waiting`/`available` whose `owner` matches the member name (heuristic until an assignee model exists — [roadmap 1.3](roadmap.md#13-assignee-model)).
 - **My time** — this week's hours as category-stacked daily bars with total and billable %, plus an "Open timesheet" shortcut. See [Time Ledger & Timesheets](#time-ledger--timesheets).
 - **Day planner** — status-check alerts first, then the agenda grouped Overdue / Due today / Next 7 days / Later / No due date (flagged cards are excluded from these groups to avoid duplication), then a Monday-first month calendar with dots on days where matters are due. Agenda items open the regular Matter view.
 - **Agent chat ("Vectis Assistant")** — message list + input. Replies come from `getAgentReply` in [src/agent.js](src/agent.js): today a local rules engine over the live board and time ledger (due dates, waiting matters, status checks, workload, weekly time summaries), plus the `log …` command which writes a ledger entry via the `timeEntry` field on the structured reply. The function is the single seam to swap in a real agent endpoint. Chat history persists to localStorage. The panel is labelled "preview" and the empty state says replies are generated locally.
@@ -159,8 +161,18 @@ Configured by `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` in `.env.local` (se
 
 - **Model:** the board is one JSONB document per workspace (`boards.state` — cards are heavily interlinked, so document sync first); `time_entries`, `rates`, and `sharing_levels` are relational rows because the ledger is the sensitive, reportable data.
 - **Sync** ([src/remote.js](src/remote.js) + [src/useRemoteSync.js](src/useRemoteSync.js)): remote wins on load; after hydration, local changes write through (board debounced as a document, ledger as a diffed change-set, rates/sharing as upserts with echo guards). Realtime subscriptions apply other clients' changes live; our own board echoes are filtered by a per-session `CLIENT_ID`. Every IO helper swallows errors with a `console.warn` — remote failure never breaks local UX. Conflict strategy is last-write-wins (v1).
-- **RLS:** enabled on all tables with **temporary permissive pre-auth policies** — the consent model stays client-enforced until Supabase Auth ships (auth-phase policy sketch at the bottom of the migration). Do not treat sharing levels as a security boundary yet.
+- **RLS:** [0001_init.sql](supabase/migrations/0001_init.sql) ships **temporary permissive pre-auth policies**; [0002_auth.sql](supabase/migrations/0002_auth.sql) replaces them with the real auth-based policies (see [Authentication](#authentication)). Until 0002 is applied, sharing levels are only a client-side contract and anyone with the publishable key can read/write everything — do not put real client data in before then.
 - Never put the service-role key or database password in env files or the repo — the publishable key only.
+
+### Authentication
+
+Google Workspace SSO via Supabase Auth, gated by the same `VITE_SUPABASE_*` env vars as sync — with no env, `authEnabled` is false, there is no login gate, and the app runs local-only (which is how the test suite runs). Enabled by applying [supabase/migrations/0002_auth.sql](supabase/migrations/0002_auth.sql) **after** 0001.
+
+- **Roster & roles:** the `members` table maps each Google Workspace email to a board slot (`user-1`..`user-4`, matching `TEAM_MEMBERS`) and a role (`manager` | `member`). It is the single source of truth; a login whose email isn't on the roster is denied (the "no access" screen). Edit the seeded emails in 0002 before running it.
+- **Login gate** ([src/useAuth.js](src/useAuth.js) + [src/AuthGate.jsx](src/AuthGate.jsx)): `loading → signed-out → (signed-in | unknown)`. The board renders only when `signed-in`.
+- **Two identities** ([src/App.jsx](src/App.jsx)): `authMemberId` is who we *write* as (always the signed-in member — RLS rejects anything else); the viewing lens equals it unless a **manager** uses the manager-only "Viewing as" picker. Even a manager's view-as respects each member's sharing tier — consent binds the org, not just peers.
+- **Actors:** status changes, drags, and work-log entries stamp `by: authMemberId`; the Matter view's history log shows the actor's name.
+- **Database-enforced consent** (RLS in 0002): you always read your own time entries; you read another member's *detail* only if their sharing level is `full`; `totals`/`private` detail is hidden (a SECURITY DEFINER `time_entry_totals` view exposes aggregates for `totals` members). Writes are owner-only; rates are manager-only; sharing levels are self-only. `current_member_id()` / `is_manager()` are SECURITY DEFINER helpers that resolve the caller from their JWT email without recursing on `members`.
 
 ### Local (localStorage)
 
@@ -201,8 +213,8 @@ Mechanics:
 
 These are facts about today's code. The plan to address each lives in [roadmap.md](roadmap.md).
 
-1. Supabase sync exists but has no auth — anyone with the app URL and publishable key reads/writes everything (permissive pre-auth RLS). Sharing levels are a client-side contract until Auth + real RLS land. Sync is last-write-wins with no offline queue.
-2. Team columns are hardcoded via `TEAM_MEMBERS`; no dynamic roster, no manager role (status-check resolution is not permission-gated, and identity is a picker, not a login).
+1. Sync is last-write-wins with no offline queue. Security now depends on which migration is applied: with `0002_auth.sql`, RLS enforces the consent tiers and every request needs a login; with only `0001` applied, the pre-auth policies are fully permissive and sharing is a client-side contract — see [Authentication](#authentication). The live OAuth + RLS flow must be verified on a real network (the build sandbox blocks `supabase.co`).
+2. The roster is still a fixed four slots (`members` seeds `user-1`..`user-4`); no dynamic roster / self-service onboarding yet. A **manager** role now exists (manager-only view-as; rates are manager-write in RLS), but status-check resolution is not yet permission-gated in the UI.
 3. The assistant chat is a local rules engine, not a real agent; `aiContext` remains hand-authored placeholder text.
 4. "Notify users and manager" for status checks means in-app surfacing only — no email/push.
 5. "My matters" relies on the free-text `owner` field matching the member name.

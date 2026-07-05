@@ -2338,3 +2338,95 @@ button.projection-backdrop {
     padding-left: 0;
   }
 }
+
+/* ── Auth gate ─────────────────────────────────────────────────────────── */
+/* Sign-in, loading, and no-access screens shown before the board when
+   Supabase Auth is configured. Local-only mode never renders these. */
+
+.auth-gate {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg-color);
+}
+
+.auth-card {
+  width: min(420px, 100%);
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-card);
+  padding: 36px 32px;
+  text-align: center;
+}
+
+.auth-card h1 {
+  font-size: 1.25rem;
+  margin: 0 0 8px;
+  color: var(--text-primary);
+}
+
+.auth-lead {
+  color: var(--text-secondary);
+  margin: 0 0 22px;
+  line-height: 1.5;
+}
+
+.auth-google {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 16px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent-color);
+  border: 1px solid var(--accent-color);
+  border-radius: var(--radius-card);
+  cursor: pointer;
+}
+
+.auth-google:hover {
+  filter: brightness(0.96);
+}
+
+.auth-google.auth-secondary {
+  color: var(--text-primary);
+  background: var(--panel-bg);
+  border-color: var(--border-strong);
+}
+
+.auth-error {
+  color: var(--cat-admin);
+  margin: 16px 0 0;
+  font-size: 0.9rem;
+}
+
+.auth-warn-icon {
+  color: var(--warn-color);
+  margin-bottom: 8px;
+}
+
+.auth-spinner {
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  animation: auth-spin 1s linear infinite;
+}
+
+@keyframes auth-spin {
+  to { transform: rotate(360deg); }
+}
+
+.signout-button {
+  margin-left: auto;
+}
+
+@media (prefers-color-scheme: dark) {
+  .auth-google.auth-secondary {
+    color: var(--text-primary);
+  }
+}

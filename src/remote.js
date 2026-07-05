@@ -10,18 +10,11 @@
 // All IO helpers swallow errors with a console.warn — remote failure must
 // never break the local experience.
 
-import { createClient } from '@supabase/supabase-js';
 import { normalizeRates, normalizeTimeEntry } from './time.js';
 import { isValidBoard } from './storage.js';
+import { supabase, remoteEnabled } from './supabaseClient.js';
 
-const url = import.meta.env?.VITE_SUPABASE_URL;
-const anonKey = import.meta.env?.VITE_SUPABASE_ANON_KEY;
-
-export const remoteEnabled = Boolean(url && anonKey);
-
-const supabase = remoteEnabled
-  ? createClient(url, anonKey, { auth: { persistSession: false } })
-  : null;
+export { remoteEnabled };
 
 export const WORKSPACE_ID = 'vectis';
 
