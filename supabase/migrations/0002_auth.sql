@@ -144,23 +144,32 @@ create policy "read own or full-shared entries" on public.time_entries
     or public.share_level_for(member_id) = 'full'
   );
 
--- Writes are owner-only: you can only create/change/delete entries attributed
--- to yourself, whoever you happen to be "viewing as" in the UI.
+-- Writes: you can always create/change/delete your own entries, whoever you
+-- happen to be "viewing as" in the UI. A MANAGER may additionally administer
+-- any entry — e.g. mark another member's billable time as billed for invoicing.
+-- This does not widen what a manager can see: the read policy above still
+-- bounds them to their own + 'full'-shared rows, so a manager can never reach a
+-- 'private' or 'totals' member's detail entries to write them.
+-- (`is_manager()` must appear in the INSERT check too, because an upsert of an
+-- existing row is evaluated as INSERT ... ON CONFLICT DO UPDATE.)
 drop policy if exists "insert own entries" on public.time_entries;
-create policy "insert own entries" on public.time_entries
+drop policy if exists "insert own or managed entries" on public.time_entries;
+create policy "insert own or managed entries" on public.time_entries
   for insert to authenticated
-  with check (member_id = public.current_member_id());
+  with check (member_id = public.current_member_id() or public.is_manager());
 
 drop policy if exists "update own entries" on public.time_entries;
-create policy "update own entries" on public.time_entries
+drop policy if exists "update own or managed entries" on public.time_entries;
+create policy "update own or managed entries" on public.time_entries
   for update to authenticated
-  using (member_id = public.current_member_id())
-  with check (member_id = public.current_member_id());
+  using (member_id = public.current_member_id() or public.is_manager())
+  with check (member_id = public.current_member_id() or public.is_manager());
 
 drop policy if exists "delete own entries" on public.time_entries;
-create policy "delete own entries" on public.time_entries
+drop policy if exists "delete own or managed entries" on public.time_entries;
+create policy "delete own or managed entries" on public.time_entries
   for delete to authenticated
-  using (member_id = public.current_member_id());
+  using (member_id = public.current_member_id() or public.is_manager());
 
 -- Rates: readable by all (needed to price timesheets); writable by managers
 -- only, since a rate change is a firm-level decision.
