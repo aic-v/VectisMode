@@ -207,6 +207,39 @@ describe('setCardStatus', () => {
     expect(items).toBe(board);
   });
 
+  it('does not require a destination when leaving Done for a status with its own required column', () => {
+    const { items, requiresDestination } = setCardStatus(makeBoard(), 'c7', 'Waiting', { now: NOW });
+    expect(requiresDestination).toBe(false);
+    expect(items.archive.map((c) => c.id)).toEqual([]);
+    const moved = items.waiting.find((c) => c.id === 'c7');
+    expect(moved).toMatchObject({ status: 'Waiting' });
+  });
+
+  it('ignores a coupled destination column when restoring from Done', () => {
+    const { items } = setCardStatus(
+      makeBoard(),
+      'c7',
+      'Drafting',
+      { now: NOW, destinationColumn: 'waiting' },
+    );
+    expect(items.waiting.find((c) => c.id === 'c7')).toBeUndefined();
+    const moved = items['user-2'].find((c) => c.id === 'c7');
+    expect(moved).toMatchObject({ status: 'Drafting' });
+  });
+
+  it('falls back to available when restoring from Done with a coupled destination and no previousColumn', () => {
+    const board = makeBoard();
+    board.archive.push({ id: 'cOrphan', title: 'Orphan', status: 'Done' });
+    const { items } = setCardStatus(
+      board,
+      'cOrphan',
+      'Drafting',
+      { now: NOW, destinationColumn: 'archive' },
+    );
+    expect(items.archive.find((c) => c.id === 'cOrphan')).toBeUndefined();
+    expect(items.available.find((c) => c.id === 'cOrphan')).toMatchObject({ status: 'Drafting' });
+  });
+
   it('moves out of Done when an explicit destination is provided', () => {
     const { items, requiresDestination } = setCardStatus(
       makeBoard(),
