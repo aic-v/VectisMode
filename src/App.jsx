@@ -1183,6 +1183,11 @@ export default function App() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
+  const itemsRef = useRef(items);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
   const findContainer = useCallback((id) => findContainerIn(items, id), [items]);
 
   const handleDragStart = (event) => {
@@ -1267,6 +1272,21 @@ export default function App() {
     finishDrag();
   };
 
+  const handleDragCancel = () => {
+    suppressCardOpenUntilRef.current = Date.now() + 500;
+    if (flipTimerRef.current) {
+      window.clearTimeout(flipTimerRef.current);
+      flipTimerRef.current = null;
+    }
+    if (preDragItemsRef.current) {
+      setItems(preDragItemsRef.current);
+    }
+    setActiveId(null);
+    setDraggedFromContainer(null);
+    preDragItemsRef.current = null;
+    preDragRectRef.current = null;
+  };
+
   const updateCard = useCallback((cardId, patch) => {
     setItems((prev) => updateCardIn(prev, cardId, patch));
   }, []);
@@ -1277,15 +1297,14 @@ export default function App() {
 
   const applyStatusChange = useCallback((cardId, newStatus, destinationColumn) => {
     const now = new Date().toISOString();
-    let result;
-    setItems((prev) => {
-      result = setCardStatus(prev, cardId, newStatus, { now, destinationColumn });
-      return result.items;
-    });
-    if (result?.requiresDestination) {
+    const result = setCardStatus(itemsRef.current, cardId, newStatus, { now, destinationColumn });
+
+    if (result.requiresDestination) {
       setPendingStatusChange({ cardId, toStatus: newStatus });
       return { requiresDestination: true };
     }
+
+    setItems(result.items);
     setPendingStatusChange((current) => (current?.cardId === cardId ? null : current));
     return { requiresDestination: false };
   }, []);
@@ -1429,16 +1448,26 @@ export default function App() {
         </button>
       </div>
 
-      {commandMode === 'team' && statusCheckCards.length > 0 ? (
-        <div className="status-check-banner" role="status">
-          <AlertTriangle size={15} />
-          <span>
-            {statusCheckCards.length === 1
-              ? '1 matter needs a status check'
-              : `${statusCheckCards.length} matters need a status check`}
-          </span>
-          {statusCheckCards.map((card) => (
-            <StatusCheckBannerItem key={card.id} card={card} onOpen={handleCardOpen} />
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCorners}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+      >
+        <div className="board-grid">
+          {TEAM_COLUMN_IDS.map((columnId) => (
+            <Container
+              key={columnId}
+              id={columnId}
+              title={COLUMN_TITLES[columnId]}
+              icon={<User size={18} />}
+              items={items[columnId]}
+              count={items[columnId].length}
+              projectedCardId={overlayCardId}
+              onCardOpen={handleCardOpen}
+            />
           ))}
         </div>
       ) : null}
