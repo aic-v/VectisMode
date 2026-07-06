@@ -194,7 +194,7 @@ function moveToContainer(items, cardId, toColumn) {
   };
 }
 
-export function setCardStatus(items, cardId, newStatus, { now, destinationColumn } = {}) {
+export function setCardStatus(items, cardId, newStatus, { now, destinationColumn, actor } = {}) {
   const card = findCard(items, cardId);
   if (!card) return { items, requiresDestination: false };
 
@@ -260,6 +260,7 @@ export function setCardStatus(items, cardId, newStatus, { now, destinationColumn
     kind: 'status',
     from: currentStatus,
     to: newStatus,
+    ...(actor ? { by: actor } : {}),
   });
 
   if (targetColumn !== currentColumn) {
@@ -269,13 +270,14 @@ export function setCardStatus(items, cardId, newStatus, { now, destinationColumn
       from: currentColumn,
       to: targetColumn,
       reason: 'status',
+      ...(actor ? { by: actor } : {}),
     });
   }
 
   return { items: next, requiresDestination: false };
 }
 
-export function applyDragLanding(items, cardId, { fromColumn, now }) {
+export function applyDragLanding(items, cardId, { fromColumn, now, actor }) {
   const toColumn = findContainer(items, cardId);
   if (!toColumn || toColumn === fromColumn) return items;
 
@@ -316,6 +318,7 @@ export function applyDragLanding(items, cardId, { fromColumn, now }) {
     from: fromColumn,
     to: toColumn,
     reason: 'drag',
+    ...(actor ? { by: actor } : {}),
   });
 
   if (newStatus !== currentStatus) {
@@ -325,6 +328,7 @@ export function applyDragLanding(items, cardId, { fromColumn, now }) {
       from: currentStatus,
       to: newStatus,
       reason: 'column',
+      ...(actor ? { by: actor } : {}),
     });
   }
 

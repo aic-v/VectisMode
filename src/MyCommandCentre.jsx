@@ -381,42 +381,49 @@ export default function MyCommandCentre({
   items,
   memberId,
   onMemberChange,
+  canViewAs = true,
+  roster = TEAM_MEMBERS,
   onCardOpen,
   timeEntries,
   onLogTime,
   shareLevel,
   onShareLevelChange,
+  canEditShare = true,
   onOpenTimesheet,
 }) {
   return (
     <div className="my-centre">
       <div className="my-centre-toolbar">
-        <label className="identity-picker">
-          <span className="details-section-label">Sharing</span>
-          <select
-            className="form-input identity-select"
-            aria-label="Time sharing level"
-            value={shareLevel}
-            onChange={(event) => onShareLevelChange(event.target.value)}
-          >
-            {SHARE_LEVELS.map(({ key, label }) => (
-              <option key={key} value={key}>{label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="identity-picker">
-          <span className="details-section-label">Viewing as</span>
-          <select
-            className="form-input identity-select"
-            aria-label="Viewing as"
-            value={memberId}
-            onChange={(event) => onMemberChange(event.target.value)}
-          >
-            {TEAM_MEMBERS.map((member) => (
-              <option key={member.id} value={member.id}>{member.name}</option>
-            ))}
-          </select>
-        </label>
+        {canEditShare ? (
+          <label className="identity-picker">
+            <span className="details-section-label">Sharing</span>
+            <select
+              className="form-input identity-select"
+              aria-label="Time sharing level"
+              value={shareLevel}
+              onChange={(event) => onShareLevelChange(event.target.value)}
+            >
+              {SHARE_LEVELS.map(({ key, label }) => (
+                <option key={key} value={key}>{label}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        {canViewAs ? (
+          <label className="identity-picker">
+            <span className="details-section-label">Viewing as</span>
+            <select
+              className="form-input identity-select"
+              aria-label="Viewing as"
+              value={memberId}
+              onChange={(event) => onMemberChange(event.target.value)}
+            >
+              {roster.map((member) => (
+                <option key={member.id} value={member.id}>{member.name}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </div>
       <MyTimePanel
         timeEntries={timeEntries}

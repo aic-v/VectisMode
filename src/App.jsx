@@ -35,7 +35,8 @@ import {
   CheckCircle2,
   Building2,
   UserCheck,
-  AlertTriangle
+  AlertTriangle,
+  LogOut
 } from 'lucide-react';
 import {
   CLIENTS,
@@ -56,6 +57,7 @@ import {
   resolveStatusCheck,
   setCardStatus,
   updateCard as updateCardIn,
+  TEAM_MEMBERS,
 } from './board.js';
 import {
   IDENTITY_STORAGE_KEY,
@@ -85,6 +87,8 @@ import {
 import MyCommandCentre from './MyCommandCentre.jsx';
 import TimesheetOverlay from './Timesheets.jsx';
 import useRemoteSync from './useRemoteSync.js';
+import useAuth from './useAuth.js';
+import { AuthLoading, SignIn, NotAuthorized } from './AuthGate.jsx';
 
 const STATUS_META = {
   'Not Started': { Icon: Circle },
@@ -127,17 +131,20 @@ function formatLoggedAt(iso) {
   });
 }
 
+const MEMBER_NAMES = Object.fromEntries(TEAM_MEMBERS.map((m) => [m.id, m.name]));
+
 function describeHistoryEvent(event) {
   if (!event) return '';
+  const actor = event.by ? ` · ${MEMBER_NAMES[event.by] ?? event.by}` : '';
   if (event.kind === 'status') {
     const from = event.from ?? 'Not set';
     const to = event.to ?? 'Not set';
-    return `Status: ${from} → ${to}`;
+    return `Status: ${from} → ${to}${actor}`;
   }
   if (event.kind === 'column') {
     const from = COLUMN_TITLES[event.from] ?? event.from ?? 'Unknown';
     const to = COLUMN_TITLES[event.to] ?? event.to ?? 'Unknown';
-    return `Moved: ${from} → ${to}`;
+    return `Moved: ${from} → ${to}${actor}`;
   }
   return '';
 }
@@ -1120,7 +1127,29 @@ export default function App() {
   const [activeId, setActiveId] = useState(null);
   const flipTimerRef = useRef(null);
   const [commandMode, setCommandMode] = useState('team');
-  const [memberId, setMemberId] = useState(() => loadJSON(IDENTITY_STORAGE_KEY) ?? 'user-1');
+  const auth = useAuth();
+  // Identity has two roles that collapse into one in local-only mode:
+  //   * authMemberId — who we WRITE as. Always the signed-in member; RLS
+  //     rejects writes attributed to anyone else.
+  //   * memberId (below) — the VIEWING lens, i.e. whose board/time is on
+  //     screen. Equals authMemberId unless a manager is viewing-as someone.
+  // In local-only mode there is no session, so the picker drives both.
+  const [localMemberId, setLocalMemberId] = useState(
+    () => loadJSON(IDENTITY_STORAGE_KEY) ?? 'user-1',
+  );
+  const [viewAsId, setViewAsId] = useState(null);
+  const authMemberId = auth.status === 'signed-in' ? auth.member.memberId : localMemberId;
+  const role = auth.status === 'signed-in' ? auth.member.role : 'manager';
+  const canViewAs = role === 'manager';
+  // The lens: a manager's explicit view-as target, else the signed-in member;
+  // in local mode it is simply the picker choice.
+  const memberId =
+    auth.status === 'signed-in'
+      ? (canViewAs && viewAsId ? viewAsId : authMemberId)
+      : localMemberId;
+  // The picker changes the local identity when offline, or the view-as lens
+  // when signed in.
+  const setMemberId = auth.status === 'signed-in' ? setViewAsId : setLocalMemberId;
   const suppressCardOpenUntilRef = useRef(0);
   const preDragItemsRef = useRef(null);
   const preDragRectRef = useRef(null);
@@ -1129,9 +1158,11 @@ export default function App() {
     saveBoard(items);
   }, [items]);
 
+  // Persist the picker choice only in local-only mode — in auth mode identity
+  // comes from the session, and a shared machine must not remember a lens.
   useEffect(() => {
-    saveJSON(IDENTITY_STORAGE_KEY, memberId);
-  }, [memberId]);
+    if (auth.status === 'disabled') saveJSON(IDENTITY_STORAGE_KEY, localMemberId);
+  }, [localMemberId, auth.status]);
 
   // Waiting-Response watchdog: flag cards that have sat in Waiting for the
   // threshold as Status Check, on load and then once a minute.
@@ -1264,7 +1295,7 @@ export default function App() {
     if (crossedContainers) {
       const fromColumn = draggedFromContainer;
       const now = new Date().toISOString();
-      setItems((prev) => applyDragLanding(prev, active.id, { fromColumn, now }));
+      setItems((prev) => applyDragLanding(prev, active.id, { fromColumn, now, actor: authMemberId }));
     } else if (activeContainer && overContainer && activeContainer === overContainer) {
       setItems((prev) => reorderWithin(prev, { activeId: active.id, overId: over?.id }));
     }
@@ -1292,8 +1323,8 @@ export default function App() {
   }, []);
 
   const addWorkLogEntry = useCallback((cardId, entry) => {
-    setItems((prev) => appendWorkLogEntry(prev, cardId, entry));
-  }, []);
+    setItems((prev) => appendWorkLogEntry(prev, cardId, { ...entry, by: authMemberId }));
+  }, [authMemberId]);
 
   const applyStatusChange = useCallback((cardId, newStatus, destinationColumn) => {
     const now = new Date().toISOString();
@@ -1307,7 +1338,7 @@ export default function App() {
     setItems(result.items);
     setPendingStatusChange((current) => (current?.cardId === cardId ? null : current));
     return { requiresDestination: false };
-  }, []);
+  }, [authMemberId]);
 
   const handleStatusChange = useCallback((cardId, newStatus) => {
     applyStatusChange(cardId, newStatus);
@@ -1336,14 +1367,16 @@ export default function App() {
     const entry = {
       id: crypto.randomUUID(),
       loggedAt: new Date().toISOString(),
-      memberId,
       date: isoDate(new Date()),
       matterTitle: card?.title ?? null,
       client: card?.client ?? null,
       ...fields,
+      // Always attributed to the signed-in member, never the view-as lens —
+      // RLS rejects inserts whose member_id isn't the caller's own.
+      memberId: authMemberId,
     };
     setTimeEntries((prev) => addTimeEntry(prev, entry));
-  }, [items, memberId]);
+  }, [items, authMemberId]);
 
   const handleUpdateTimeEntry = useCallback((id, patch) => {
     setTimeEntries((prev) => updateTimeEntry(prev, id, patch));
@@ -1403,6 +1436,14 @@ export default function App() {
   const overlayCardId = projectedCard?.id ?? focusedCard?.id;
   const statusCheckCards = getStatusCheckCards(items);
 
+  // Auth gate — only when Supabase is configured. Local-only mode
+  // (auth.status === 'disabled') falls straight through to the board.
+  if (auth.status === 'loading') return <AuthLoading />;
+  if (auth.status === 'signed-out') return <SignIn onSignIn={auth.signIn} />;
+  if (auth.status === 'unknown') {
+    return <NotAuthorized email={auth.member?.email} onSignOut={auth.signOut} />;
+  }
+
   return (
     <div className="dashboard-container">
       <div className="dashboard-header">
@@ -1425,6 +1466,20 @@ export default function App() {
           <span>Archive</span>
         </button>
         <h1>Vectis Law Command Center</h1>
+        {auth.status === 'signed-in' ? (
+          <button
+            type="button"
+            className="archive-button signout-button"
+            aria-label={`Sign out ${auth.member.name}`}
+            onClick={() => {
+              setViewAsId(null);
+              auth.signOut();
+            }}
+          >
+            <LogOut size={14} />
+            <span>{auth.member.name}</span>
+          </button>
+        ) : null}
       </div>
 
       <div className="command-mode-toggle" role="group" aria-label="Command centre view">
@@ -1519,11 +1574,14 @@ export default function App() {
           items={items}
           memberId={memberId}
           onMemberChange={setMemberId}
+          canViewAs={canViewAs}
+          roster={auth.status === 'signed-in' ? auth.roster : TEAM_MEMBERS}
           onCardOpen={handleCardOpen}
           timeEntries={timeEntries}
           onLogTime={logTime}
-          shareLevel={shareLevelFor(memberId)}
-          onShareLevelChange={(level) => setShareLevel(memberId, level)}
+          shareLevel={shareLevelFor(authMemberId)}
+          onShareLevelChange={(level) => setShareLevel(authMemberId, level)}
+          canEditShare={memberId === authMemberId}
           onOpenTimesheet={openTimesheet}
         />
       )}

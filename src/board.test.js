@@ -280,6 +280,21 @@ describe('setCardStatus', () => {
       { at: NOW, kind: 'column', from: 'user-1', to: 'waiting', reason: 'status' },
     ]);
   });
+
+  it('stamps the actor on history events when one is supplied', () => {
+    const { items } = setCardStatus(makeBoard(), 'c1', 'Waiting', { now: NOW, actor: 'user-3' });
+    const card = items.waiting.find((c) => c.id === 'c1');
+    expect(card.history).toEqual([
+      { at: NOW, kind: 'status', from: 'Reviewing', to: 'Waiting', by: 'user-3' },
+      { at: NOW, kind: 'column', from: 'user-1', to: 'waiting', reason: 'status', by: 'user-3' },
+    ]);
+  });
+
+  it('omits the actor field entirely when none is supplied', () => {
+    const { items } = setCardStatus(makeBoard(), 'c1', 'Drafting', { now: NOW });
+    const [event] = items['user-1'].find((c) => c.id === 'c1').history;
+    expect('by' in event).toBe(false);
+  });
 });
 
 describe('applyDragLanding', () => {
@@ -321,6 +336,16 @@ describe('applyDragLanding', () => {
     const landed = next['user-2'].find((c) => c.id === 'c1');
     expect(landed.history).toEqual([
       { at: NOW, kind: 'column', from: 'user-1', to: 'user-2', reason: 'drag' },
+    ]);
+  });
+
+  it('stamps the actor on the drag history event when supplied', () => {
+    const board = makeBoard();
+    const moved = moveCardAcross(board, { activeId: 'c1', overId: 'user-2' });
+    const next = applyDragLanding(moved, 'c1', { fromColumn: 'user-1', now: NOW, actor: 'user-2' });
+    const landed = next['user-2'].find((c) => c.id === 'c1');
+    expect(landed.history).toEqual([
+      { at: NOW, kind: 'column', from: 'user-1', to: 'user-2', reason: 'drag', by: 'user-2' },
     ]);
   });
 
