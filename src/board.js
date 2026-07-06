@@ -6,6 +6,7 @@ export const STATUS_KEYS = [
   'Drafting',
   'Reviewing',
   'Waiting',
+  'Status Check',
   'Done',
 ];
 
@@ -30,28 +31,44 @@ export const COLUMN_TITLES = {
 
 export const RESTORE_COLUMNS = ['user-1', 'user-2', 'user-3', 'user-4', 'available'];
 
+export const TEAM_MEMBERS = [
+  { id: 'user-1', name: 'Partner A' },
+  { id: 'user-2', name: 'Partner B' },
+  { id: 'user-3', name: 'Associate 1' },
+  { id: 'user-4', name: 'Associate 2' },
+];
+
 export const STATUS_TO_COLUMN = {
   Waiting: 'waiting',
+  'Status Check': 'waiting',
   Done: 'archive',
 };
 
 export const DEFAULT_RESTORED_STATUS = 'Reviewing';
 
+export const STATUS_CHECK_THRESHOLD_DAYS = 7;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Sample data only: give the seeded Waiting card a real waitingSince so the
+// 7-day status check is demonstrable on first load.
+const SAMPLE_WAITING_SINCE = new Date(Date.now() - 9 * DAY_MS).toISOString();
+
 export const INITIAL_ITEMS = {
   'user-1': [
-    { id: 'c1', title: 'Review MSA for Acme Corp', status: 'Reviewing', dueDate: 'May 25, 2026', client: 'Acme Corp', owner: 'Partner A', team: 'Commercial', aiContext: 'Draft contains standard indemnity clauses. Requires specific review of liability cap.', workLog: [], history: [] },
-    { id: 'c2', title: 'Draft Employee Handbook', status: 'Drafting', dueDate: 'Jun 04, 2026', client: 'Internal', owner: 'Partner A', team: 'Employment', aiContext: 'Needs alignment with new remote work policies.', workLog: [], history: [] },
+    { id: 'c1', title: 'Review MSA for Acme Corp', status: 'Reviewing', dueDate: 'May 25, 2026', client: 'Acme Corp', owner: 'Partner A', team: 'Commercial', aiContext: 'Draft contains standard indemnity clauses. Requires specific review of liability cap.', description: 'Review the master services agreement returned by Acme Corp. Their markups touch the indemnity clauses and the liability cap; confirm the cap still protects us at 12 months of fees and that the carve-outs match our standard position.', tasksUrl: 'https://tasks.vectis.law/matters/c1', timeEntriesUrl: 'https://time.vectis.law/matters/c1', taskFolderUrl: 'https://files.vectis.law/matters/c1', workLog: [], history: [] },
+    { id: 'c2', title: 'Draft Employee Handbook', status: 'Drafting', dueDate: 'Jun 04, 2026', client: 'Internal', owner: 'Partner A', team: 'Employment', aiContext: 'Needs alignment with new remote work policies.', description: 'Produce the first full draft of the firm employee handbook. The remote-work and equipment sections need to reflect the policy agreed in April; everything else can follow last year\'s template.', tasksUrl: 'https://tasks.vectis.law/matters/c2', timeEntriesUrl: 'https://time.vectis.law/matters/c2', taskFolderUrl: 'https://files.vectis.law/matters/c2', workLog: [], history: [] },
   ],
   'user-2': [
-    { id: 'c3', title: 'Data Privacy Addendum', status: 'Research and Planning', dueDate: 'May 22, 2026', client: 'EuroTech Ltd', owner: 'Partner B', team: 'Privacy', aiContext: 'Standard DPA. Matches previous templates used for EU clients.', workLog: [], history: [] },
+    { id: 'c3', title: 'Data Privacy Addendum', status: 'Research and Planning', dueDate: 'May 22, 2026', client: 'EuroTech Ltd', owner: 'Partner B', team: 'Privacy', aiContext: 'Standard DPA. Matches previous templates used for EU clients.', description: 'Prepare a data privacy addendum for EuroTech Ltd based on our standard EU DPA template. Check the sub-processor list and the international transfer mechanism before circulating.', tasksUrl: 'https://tasks.vectis.law/matters/c3', timeEntriesUrl: 'https://time.vectis.law/matters/c3', taskFolderUrl: 'https://files.vectis.law/matters/c3', workLog: [], history: [] },
   ],
   'user-3': [],
   'user-4': [],
   waiting: [
-    { id: 'c4', title: 'Response from Opposing Counsel', status: 'Waiting', dueDate: 'May 19, 2026', client: 'Initech LLC', owner: 'Partner A', team: 'IP & Licensing', aiContext: 'Pending their markups on the IP licensing agreement.', workLog: [], history: [] },
+    { id: 'c4', title: 'Response from Opposing Counsel', status: 'Waiting', dueDate: 'May 19, 2026', client: 'Initech LLC', owner: 'Partner A', team: 'IP & Licensing', aiContext: 'Pending their markups on the IP licensing agreement.', description: 'Awaiting opposing counsel\'s markups on the IP licensing agreement for Initech LLC. Chase if nothing arrives; the licence needs to be signed before their product launch.', tasksUrl: 'https://tasks.vectis.law/matters/c4', timeEntriesUrl: 'https://time.vectis.law/matters/c4', taskFolderUrl: 'https://files.vectis.law/matters/c4', waitingSince: SAMPLE_WAITING_SINCE, previousColumn: 'user-1', previousStatus: 'Reviewing', workLog: [], history: [] },
   ],
   available: [
-    { id: 'c5', title: 'Draft standard Terms of Service', status: 'Not Started', dueDate: null, client: null, owner: null, team: null, aiContext: 'Requested by new startup client.', workLog: [], history: [] },
+    { id: 'c5', title: 'Draft standard Terms of Service', status: 'Not Started', dueDate: null, client: null, owner: null, team: null, aiContext: 'Requested by new startup client.', description: 'Draft a reusable set of standard terms of service for SaaS clients. Start from the Vandelay engagement and generalise the payment and acceptable-use sections.', tasksUrl: 'https://tasks.vectis.law/matters/c5', timeEntriesUrl: 'https://time.vectis.law/matters/c5', taskFolderUrl: 'https://files.vectis.law/matters/c5', workLog: [], history: [] },
   ],
   archive: [],
 };
@@ -184,7 +201,12 @@ export function setCardStatus(items, cardId, newStatus, { now, destinationColumn
   const currentColumn = findContainer(items, cardId);
   const currentStatus = card.status ?? null;
 
-  if (newStatus === currentStatus && !destinationColumn) {
+  const destination =
+    destinationColumn && destinationColumn in items && destinationColumn !== 'archive'
+      ? destinationColumn
+      : null;
+
+  if (newStatus === currentStatus && !destination) {
     return { items, requiresDestination: false };
   }
 
@@ -210,6 +232,21 @@ export function setCardStatus(items, cardId, newStatus, { now, destinationColumn
     targetColumn = safeDestination ?? card.previousColumn ?? 'available';
     patch.previousColumn = null;
     patch.previousStatus = null;
+  }
+
+  if (targetColumn === 'waiting' && currentColumn !== 'waiting') {
+    patch.waitingSince = now ?? null;
+  } else if (currentColumn === 'waiting' && targetColumn !== 'waiting') {
+    patch.waitingSince = null;
+  } else if (currentColumn === 'waiting' && newStatus === 'Waiting' && currentStatus === 'Status Check') {
+    // A manager keeping the matter in Waiting restarts the 7-day clock.
+    patch.waitingSince = now ?? null;
+  }
+
+  if (newStatus === 'Status Check') {
+    patch.statusCheckAt = now ?? null;
+  } else if (currentStatus === 'Status Check') {
+    patch.statusCheckAt = null;
   }
 
   let next = updateCard(items, cardId, patch);
@@ -250,6 +287,7 @@ export function applyDragLanding(items, cardId, { fromColumn, now }) {
   const patch = {};
 
   if (toColumn === 'waiting') {
+    patch.waitingSince = now ?? null;
     if (currentStatus !== 'Waiting') {
       newStatus = 'Waiting';
       patch.previousColumn = isCoupledColumn(fromColumn) ? null : fromColumn;
@@ -259,6 +297,8 @@ export function applyDragLanding(items, cardId, { fromColumn, now }) {
     newStatus = card.previousStatus ?? DEFAULT_RESTORED_STATUS;
     patch.previousColumn = null;
     patch.previousStatus = null;
+    patch.waitingSince = null;
+    patch.statusCheckAt = null;
   }
 
   if (newStatus !== currentStatus) {
@@ -293,4 +333,51 @@ export function applyDragLanding(items, cardId, { fromColumn, now }) {
 
 export function getArchivedCards(items) {
   return items.archive ?? [];
+}
+
+export function getStatusCheckDueCards(items, { now, thresholdDays = STATUS_CHECK_THRESHOLD_DAYS } = {}) {
+  const nowMs = new Date(now).getTime();
+  if (!Number.isFinite(nowMs)) return [];
+
+  return (items.waiting ?? []).filter((card) => {
+    if (card.status !== 'Waiting' || !card.waitingSince) return false;
+    const sinceMs = new Date(card.waitingSince).getTime();
+    return Number.isFinite(sinceMs) && nowMs - sinceMs >= thresholdDays * DAY_MS;
+  });
+}
+
+export function getStatusCheckCards(items) {
+  return (items.waiting ?? []).filter((card) => card.status === 'Status Check');
+}
+
+export function applyStatusChecks(items, { now, thresholdDays } = {}) {
+  const due = getStatusCheckDueCards(items, { now, thresholdDays });
+  let next = items;
+  for (const card of due) {
+    next = setCardStatus(next, card.id, 'Status Check', { now }).items;
+  }
+  return { items: next, flaggedIds: due.map((card) => card.id) };
+}
+
+export function resolveStatusCheck(items, cardId, { action, destinationColumn, now } = {}) {
+  const card = findCard(items, cardId);
+  if (!card || card.status !== 'Status Check') return items;
+
+  if (action === 'archive') {
+    return setCardStatus(items, cardId, 'Done', { now }).items;
+  }
+
+  if (action === 'keep-waiting') {
+    return setCardStatus(items, cardId, 'Waiting', { now }).items;
+  }
+
+  if (action === 'assign') {
+    const restoredStatus =
+      card.previousStatus && !requiredColumnFor(card.previousStatus)
+        ? card.previousStatus
+        : DEFAULT_RESTORED_STATUS;
+    return setCardStatus(items, cardId, restoredStatus, { now, destinationColumn }).items;
+  }
+
+  return items;
 }

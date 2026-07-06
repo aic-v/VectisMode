@@ -34,23 +34,57 @@ import {
   Eye,
   CheckCircle2,
   Building2,
-  UserCheck
+  UserCheck,
+  AlertTriangle
 } from 'lucide-react';
 import {
   CLIENTS,
   COLUMN_TITLES,
   INITIAL_ITEMS,
   RESTORE_COLUMNS,
+  STATUS_CHECK_THRESHOLD_DAYS,
   STATUS_KEYS,
   appendWorkLogEntry,
   applyDragLanding,
+  applyStatusChecks,
+  findCard,
   findContainer as findContainerIn,
   getArchivedCards,
+  getStatusCheckCards,
   moveCardAcross,
   reorderWithin,
+  resolveStatusCheck,
   setCardStatus,
   updateCard as updateCardIn,
 } from './board.js';
+import {
+  IDENTITY_STORAGE_KEY,
+  SHARING_STORAGE_KEY,
+  loadBoard,
+  loadJSON,
+  loadRates,
+  loadTimeEntries,
+  saveBoard,
+  saveJSON,
+  saveRates,
+  saveTimeEntries,
+} from './storage.js';
+import {
+  DEFAULT_CATEGORY,
+  DEFAULT_SHARE_LEVEL,
+  WORK_CATEGORIES,
+  addTimeEntry,
+  categoryLabel,
+  filterEntries,
+  isoDate,
+  markEntriesBilled,
+  removeTimeEntry,
+  sumHours,
+  updateTimeEntry,
+} from './time.js';
+import MyCommandCentre from './MyCommandCentre.jsx';
+import TimesheetOverlay from './Timesheets.jsx';
+import useRemoteSync from './useRemoteSync.js';
 
 const STATUS_META = {
   'Not Started': { Icon: Circle },
@@ -58,6 +92,7 @@ const STATUS_META = {
   'Drafting': { Icon: Pencil },
   'Reviewing': { Icon: Eye },
   'Waiting': { Icon: Clock },
+  'Status Check': { Icon: AlertTriangle },
   'Done': { Icon: CheckCircle2 },
 };
 
@@ -174,7 +209,11 @@ function SortableCard({ id, card, isProjectingSource, onOpen }) {
       {...attributes}
     >
       <div className="card-inner">
-        <div className="card-front" {...dragListeners} onClick={handleOpen}>
+        <div
+          className={`card-front ${card.status === 'Status Check' ? 'card-front--alert' : ''}`}
+          {...dragListeners}
+          onClick={handleOpen}
+        >
           <div className="card-drag-handle">
             <GripVertical size={16} />
           </div>
@@ -195,12 +234,14 @@ function WorkLogForm({ cardId, cardTitle, cardStatus, onSave, onCancel }) {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [hours, setHours] = useState('');
+  const [category, setCategory] = useState(DEFAULT_CATEGORY);
   const [nextSteps, setNextSteps] = useState('');
 
   const descriptionId = `worklog-description-${cardId}`;
   const startDateId = `worklog-start-${cardId}`;
   const endDateId = `worklog-end-${cardId}`;
   const hoursId = `worklog-hours-${cardId}`;
+  const categoryId = `worklog-category-${cardId}`;
   const nextStepsId = `worklog-next-${cardId}`;
   const statusId = `worklog-status-${cardId}`;
 
@@ -279,17 +320,32 @@ function WorkLogForm({ cardId, cardTitle, cardStatus, onSave, onCancel }) {
         </div>
       </div>
 
-      <div className="form-group">
-        <label className="details-section-label" htmlFor={hoursId}>Est. time spent (hrs)</label>
-        <input
-          id={hoursId}
-          type="number"
-          step="0.5"
-          className="form-input"
-          placeholder="1.5"
-          value={hours}
-          onChange={(e) => setHours(e.target.value)}
-        />
+      <div className="form-row">
+        <div className="form-group">
+          <label className="details-section-label" htmlFor={hoursId}>Est. time spent (hrs)</label>
+          <input
+            id={hoursId}
+            type="number"
+            step="0.5"
+            className="form-input"
+            placeholder="1.5"
+            value={hours}
+            onChange={(e) => setHours(e.target.value)}
+          />
+        </div>
+        <div className="form-group">
+          <label className="details-section-label" htmlFor={categoryId}>Work category</label>
+          <select
+            id={categoryId}
+            className="form-input"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+          >
+            {WORK_CATEGORIES.map(({ key, label }) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="form-group">
@@ -316,6 +372,7 @@ function WorkLogForm({ cardId, cardTitle, cardStatus, onSave, onCancel }) {
                 startDate: startDate || null,
                 endDate: endDate || null,
                 hours: hours === '' ? null : Number(hours),
+                category,
                 nextSteps: nextSteps.trim(),
                 status,
                 loggedAt: new Date().toISOString(),
@@ -437,6 +494,180 @@ function ProjectedCard({ card, originRect: initialOriginRect, cancelOriginRect, 
   );
 }
 
+function daysBetween(fromIso, toIso) {
+  if (!fromIso || !toIso) return null;
+  const from = new Date(fromIso).getTime();
+  const to = new Date(toIso).getTime();
+  if (Number.isNaN(from) || Number.isNaN(to)) return null;
+  return Math.floor((to - from) / (24 * 60 * 60 * 1000));
+}
+
+function DetailsFooterLink({ href, Icon, label }) {
+  const isReal = typeof href === 'string' && href.startsWith('http');
+  return (
+    <a
+      className="details-footer-link"
+      href={isReal ? href : '#'}
+      target={isReal ? '_blank' : undefined}
+      rel={isReal ? 'noreferrer' : undefined}
+      onClick={isReal ? undefined : (event) => event.preventDefault()}
+    >
+      <Icon size={16} />
+      {label}
+      <ExternalLink size={13} />
+    </a>
+  );
+}
+
+const ASSIGN_COLUMNS = RESTORE_COLUMNS.filter((column) => column !== 'waiting');
+
+function StatusCheckPanel({ card, onResolve }) {
+  const waitedDays = daysBetween(card.waitingSince, card.statusCheckAt);
+  return (
+    <div className="details-section status-check-panel" role="group" aria-label="Status check">
+      <div className="details-section-label status-check-panel-label">
+        <AlertTriangle size={13} />
+        Status check
+      </div>
+      <p className="status-check-panel-hint">
+        This matter has been in <strong>Waiting Response</strong> for{' '}
+        {waitedDays != null ? `${waitedDays} days` : `over ${STATUS_CHECK_THRESHOLD_DAYS} days`}.
+        Reassign it, keep waiting, or archive it.
+      </p>
+      <div className="restore-picker-grid">
+        {ASSIGN_COLUMNS.map((columnKey) => (
+          <button
+            key={columnKey}
+            type="button"
+            className="restore-picker-option"
+            onClick={() => onResolve(card.id, 'assign', columnKey)}
+          >
+            Assign to {COLUMN_TITLES[columnKey]}
+          </button>
+        ))}
+      </div>
+      <div className="status-check-panel-actions">
+        <button
+          type="button"
+          className="restore-picker-option"
+          onClick={() => onResolve(card.id, 'keep-waiting')}
+        >
+          Keep waiting ({STATUS_CHECK_THRESHOLD_DAYS}-day clock restarts)
+        </button>
+        <button
+          type="button"
+          className="restore-picker-option status-check-archive"
+          onClick={() => onResolve(card.id, 'archive')}
+        >
+          Archive matter
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MatterTimeSection({ card, timeEntries, onLogTime, onOpenTimesheet }) {
+  const [hours, setHours] = useState('');
+  const [category, setCategory] = useState(DEFAULT_CATEGORY);
+  const [narrative, setNarrative] = useState('');
+  const [date, setDate] = useState(() => isoDate(new Date()));
+
+  const matterEntries = filterEntries(timeEntries, { cardId: card.id });
+  const total = sumHours(matterEntries);
+
+  const handleAdd = () => {
+    const parsed = Number(hours);
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    onLogTime({
+      cardId: card.id,
+      hours: parsed,
+      category,
+      narrative: narrative.trim(),
+      date,
+    });
+    setHours('');
+    setNarrative('');
+  };
+
+  return (
+    <div className="details-section">
+      <div className="matter-time-header">
+        <div className="details-section-label">Time</div>
+        {total > 0 ? (
+          <button
+            type="button"
+            className="matter-time-total"
+            onClick={() => onOpenTimesheet(card.id)}
+          >
+            {total}h logged →
+          </button>
+        ) : null}
+      </div>
+
+      <form
+        className="matter-time-quickadd"
+        onSubmit={(event) => {
+          event.preventDefault();
+          handleAdd();
+        }}
+      >
+        <input
+          className="form-input matter-time-hours"
+          aria-label="Hours"
+          type="number"
+          min="0.1"
+          step="0.1"
+          placeholder="hrs"
+          value={hours}
+          onChange={(event) => setHours(event.target.value)}
+        />
+        <select
+          className="form-input matter-time-category"
+          aria-label="Work category"
+          value={category}
+          onChange={(event) => setCategory(event.target.value)}
+        >
+          {WORK_CATEGORIES.map(({ key, label }) => (
+            <option key={key} value={key}>{label}</option>
+          ))}
+        </select>
+        <input
+          className="form-input matter-time-date"
+          aria-label="Work date"
+          type="date"
+          value={date}
+          onChange={(event) => setDate(event.target.value)}
+        />
+        <input
+          className="form-input matter-time-narrative"
+          aria-label="Narrative"
+          placeholder="What was the work?"
+          value={narrative}
+          onChange={(event) => setNarrative(event.target.value)}
+        />
+        <button type="submit" className="matter-time-add" disabled={!hours}>
+          Log
+        </button>
+      </form>
+
+      {matterEntries.length > 0 ? (
+        <ul className="matter-time-list">
+          {[...matterEntries].reverse().slice(0, 5).map((entry) => (
+            <li key={entry.id} className="matter-time-item">
+              <span className="matter-time-item-date">{entry.date}</span>
+              <span className="category-dot" style={{ background: `var(--cat-${entry.category})` }} />
+              <span className="matter-time-item-text">
+                {entry.narrative || categoryLabel(entry.category)}
+              </span>
+              <span className="matter-time-item-hours">{entry.hours}h</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function FocusedCardDetails({
   card,
   originRect,
@@ -446,6 +677,10 @@ function FocusedCardDetails({
   pendingStatusChange,
   onPickRestoreColumn,
   onCancelPendingStatus,
+  onResolveStatusCheck,
+  timeEntries,
+  onLogTime,
+  onOpenTimesheet,
 }) {
   const [expanded, setExpanded] = useState(false);
   const [target] = useState(getDetailsProjectionTarget);
@@ -608,6 +843,10 @@ function FocusedCardDetails({
             </label>
           </div>
 
+          {card.status === 'Status Check' && !pendingTo ? (
+            <StatusCheckPanel card={card} onResolve={onResolveStatusCheck} />
+          ) : null}
+
           {pendingTo ? (
             <div className="details-section restore-picker" role="group" aria-label="Choose a destination column">
               <div className="details-section-label">Move to…</div>
@@ -647,6 +886,13 @@ function FocusedCardDetails({
             />
           </div>
 
+          <MatterTimeSection
+            card={card}
+            timeEntries={timeEntries}
+            onLogTime={onLogTime}
+            onOpenTimesheet={onOpenTimesheet}
+          />
+
           {Array.isArray(card.workLog) && card.workLog.length > 0 ? (
             <div className="details-section">
               <div className="details-section-label">Work log</div>
@@ -685,24 +931,16 @@ function FocusedCardDetails({
           ) : null}
 
           <div className="details-footer">
-            <a
-              className="details-footer-link"
-              href={card.timeEntriesUrl ?? '#'}
-              onClick={(event) => event.preventDefault()}
+            <button
+              type="button"
+              className="details-footer-link details-footer-button"
+              onClick={() => onOpenTimesheet(card.id)}
             >
               <Timer size={16} />
               Time entries
               <ExternalLink size={13} />
-            </a>
-            <a
-              className="details-footer-link"
-              href={card.taskFolderUrl ?? '#'}
-              onClick={(event) => event.preventDefault()}
-            >
-              <FolderOpen size={16} />
-              Task folder
-              <ExternalLink size={13} />
-            </a>
+            </button>
+            <DetailsFooterLink href={card.taskFolderUrl} Icon={FolderOpen} label="Task folder" />
           </div>
         </div>
       </section>
@@ -826,6 +1064,26 @@ function CardOverlay({ card }) {
   );
 }
 
+function StatusCheckBannerItem({ card, onOpen }) {
+  return (
+    <button
+      type="button"
+      className="status-check-banner-item"
+      onClick={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        onOpen(card.id, {
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+          height: rect.height,
+        });
+      }}
+    >
+      {card.title}
+    </button>
+  );
+}
+
 function Container({ id, title, icon, items, count, projectedCardId, onCardOpen }) {
   const { setNodeRef, isOver } = useDroppable({ id });
 
@@ -858,19 +1116,67 @@ function Container({ id, title, icon, items, count, projectedCardId, onCardOpen 
 }
 
 export default function App() {
-  const [items, setItems] = useState(INITIAL_ITEMS);
+  const [items, setItems] = useState(() => loadBoard() ?? INITIAL_ITEMS);
   const [activeId, setActiveId] = useState(null);
   const flipTimerRef = useRef(null);
   const [commandMode, setCommandMode] = useState('team');
+  const [memberId, setMemberId] = useState(() => loadJSON(IDENTITY_STORAGE_KEY) ?? 'user-1');
   const suppressCardOpenUntilRef = useRef(0);
   const preDragItemsRef = useRef(null);
   const preDragRectRef = useRef(null);
+
+  useEffect(() => {
+    saveBoard(items);
+  }, [items]);
+
+  useEffect(() => {
+    saveJSON(IDENTITY_STORAGE_KEY, memberId);
+  }, [memberId]);
+
+  // Waiting-Response watchdog: flag cards that have sat in Waiting for the
+  // threshold as Status Check, on load and then once a minute.
+  useEffect(() => {
+    const sweep = () => {
+      setItems((prev) => applyStatusChecks(prev, { now: new Date().toISOString() }).items);
+    };
+    sweep();
+    const timer = window.setInterval(sweep, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const [draggedFromContainer, setDraggedFromContainer] = useState(null);
   const [projectedCard, setProjectedCard] = useState(null);
   const [focusedCard, setFocusedCard] = useState(null);
   const [isArchiveOpen, setIsArchiveOpen] = useState(false);
   const [pendingStatusChange, setPendingStatusChange] = useState(null);
+  const [timeEntries, setTimeEntries] = useState(() => loadTimeEntries() ?? []);
+  const [sharing, setSharing] = useState(() => loadJSON(SHARING_STORAGE_KEY) ?? {});
+  const [rates, setRates] = useState(loadRates);
+  const [timesheetView, setTimesheetView] = useState(null);
+
+  useEffect(() => {
+    saveTimeEntries(timeEntries);
+  }, [timeEntries]);
+
+  useEffect(() => {
+    saveJSON(SHARING_STORAGE_KEY, sharing);
+  }, [sharing]);
+
+  useEffect(() => {
+    saveRates(rates);
+  }, [rates]);
+
+  // Supabase two-way sync — a no-op unless VITE_SUPABASE_* env vars are set.
+  useRemoteSync({
+    items,
+    setItems,
+    timeEntries,
+    setTimeEntries,
+    rates,
+    setRates,
+    sharing,
+    setSharing,
+  });
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -1017,6 +1323,58 @@ export default function App() {
     setPendingStatusChange((current) => (current?.cardId === cardId ? null : current));
   }, []);
 
+  const handleResolveStatusCheck = useCallback((cardId, action, destinationColumn) => {
+    const now = new Date().toISOString();
+    setItems((prev) => resolveStatusCheck(prev, cardId, { action, destinationColumn, now }));
+  }, []);
+
+  // Append a ledger entry. Caller supplies the work fields; identity, matter
+  // context, id, and loggedAt are stamped here so every capture surface
+  // (work-log form, quick-add, chat) produces the same shape.
+  const logTime = useCallback((fields) => {
+    const card = fields.cardId ? findCard(items, fields.cardId) : null;
+    const entry = {
+      id: crypto.randomUUID(),
+      loggedAt: new Date().toISOString(),
+      memberId,
+      date: isoDate(new Date()),
+      matterTitle: card?.title ?? null,
+      client: card?.client ?? null,
+      ...fields,
+    };
+    setTimeEntries((prev) => addTimeEntry(prev, entry));
+  }, [items, memberId]);
+
+  const handleUpdateTimeEntry = useCallback((id, patch) => {
+    setTimeEntries((prev) => updateTimeEntry(prev, id, patch));
+  }, []);
+
+  const handleRemoveTimeEntry = useCallback((id) => {
+    setTimeEntries((prev) => removeTimeEntry(prev, id));
+  }, []);
+
+  const handleMarkBilled = useCallback((ids) => {
+    const now = new Date().toISOString();
+    setTimeEntries((prev) => markEntriesBilled(prev, ids, { now }));
+  }, []);
+
+  const shareLevelFor = useCallback(
+    (id) => sharing[id] ?? DEFAULT_SHARE_LEVEL,
+    [sharing],
+  );
+
+  const setShareLevel = useCallback((id, level) => {
+    setSharing((prev) => ({ ...prev, [id]: level }));
+  }, []);
+
+  // Opening the timesheet closes the Matter view so the two overlays never
+  // stack (both listen for Escape).
+  const openTimesheet = useCallback((cardId) => {
+    setFocusedCard(null);
+    setPendingStatusChange(null);
+    setTimesheetView({ cardId: cardId ?? null });
+  }, []);
+
   const closeFocusedCard = useCallback(() => {
     setFocusedCard(null);
     setPendingStatusChange(null);
@@ -1043,10 +1401,20 @@ export default function App() {
     ? allCards.find((i) => i.id === focusedCard.id)
     : null;
   const overlayCardId = projectedCard?.id ?? focusedCard?.id;
+  const statusCheckCards = getStatusCheckCards(items);
 
   return (
     <div className="dashboard-container">
       <div className="dashboard-header">
+        <button
+          type="button"
+          className="archive-button"
+          aria-label="Open timesheet"
+          onClick={() => openTimesheet(null)}
+        >
+          <Timer size={14} />
+          <span>Timesheet</span>
+        </button>
         <button
           type="button"
           className="archive-button"
@@ -1102,26 +1470,63 @@ export default function App() {
             />
           ))}
         </div>
+      ) : null}
 
-        <div className="status-grid">
-          {STATUS_COLUMNS.map(({ id, Icon }) => (
-            <Container
-              key={id}
-              id={id}
-              title={COLUMN_TITLES[id]}
-              icon={<Icon size={18} />}
-              items={items[id]}
-              count={items[id].length}
-              projectedCardId={overlayCardId}
-              onCardOpen={handleCardOpen}
-            />
-          ))}
-        </div>
+      {commandMode === 'team' ? (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCorners}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+        >
+          <div className="board-grid">
+            {TEAM_COLUMN_IDS.map((columnId) => (
+              <Container
+                key={columnId}
+                id={columnId}
+                title={COLUMN_TITLES[columnId]}
+                icon={<User size={18} />}
+                items={items[columnId]}
+                count={items[columnId].length}
+                projectedCardId={overlayCardId}
+                onCardOpen={handleCardOpen}
+              />
+            ))}
+          </div>
 
-        <DragOverlay>
-          {activeId && activeCard ? <CardOverlay card={activeCard} /> : null}
-        </DragOverlay>
-      </DndContext>
+          <div className="status-grid">
+            {STATUS_COLUMNS.map(({ id, Icon }) => (
+              <Container
+                key={id}
+                id={id}
+                title={COLUMN_TITLES[id]}
+                icon={<Icon size={18} />}
+                items={items[id]}
+                count={items[id].length}
+                projectedCardId={overlayCardId}
+                onCardOpen={handleCardOpen}
+              />
+            ))}
+          </div>
+
+          <DragOverlay>
+            {activeId && activeCard ? <CardOverlay card={activeCard} /> : null}
+          </DragOverlay>
+        </DndContext>
+      ) : (
+        <MyCommandCentre
+          items={items}
+          memberId={memberId}
+          onMemberChange={setMemberId}
+          onCardOpen={handleCardOpen}
+          timeEntries={timeEntries}
+          onLogTime={logTime}
+          shareLevel={shareLevelFor(memberId)}
+          onShareLevelChange={(level) => setShareLevel(memberId, level)}
+          onOpenTimesheet={openTimesheet}
+        />
+      )}
 
       {projectedCard && projectedCardData ? (
         <ProjectedCard
@@ -1134,6 +1539,18 @@ export default function App() {
             }
             if (payload?.entry && hasWorkLogContent(payload.entry)) {
               addWorkLogEntry(projectedCard.id, payload.entry);
+              if (payload.entry.hours) {
+                logTime({
+                  cardId: projectedCard.id,
+                  hours: payload.entry.hours,
+                  category: payload.entry.category,
+                  narrative: payload.entry.description,
+                  date:
+                    payload.entry.endDate ||
+                    payload.entry.startDate ||
+                    isoDate(new Date()),
+                });
+              }
             }
             preDragItemsRef.current = null;
             preDragRectRef.current = null;
@@ -1162,6 +1579,26 @@ export default function App() {
           pendingStatusChange={pendingStatusChange}
           onPickRestoreColumn={handlePickRestoreColumn}
           onCancelPendingStatus={cancelPendingStatus}
+          onResolveStatusCheck={handleResolveStatusCheck}
+          timeEntries={timeEntries}
+          onLogTime={logTime}
+          onOpenTimesheet={openTimesheet}
+        />
+      ) : null}
+
+      {timesheetView ? (
+        <TimesheetOverlay
+          entries={timeEntries}
+          currentMemberId={memberId}
+          shareLevelFor={shareLevelFor}
+          initialCardId={timesheetView.cardId}
+          cardTitle={timesheetView.cardId ? findCard(items, timesheetView.cardId)?.title : null}
+          rates={rates}
+          onRatesChange={setRates}
+          onMarkBilled={handleMarkBilled}
+          onClose={() => setTimesheetView(null)}
+          onUpdateEntry={handleUpdateTimeEntry}
+          onRemoveEntry={handleRemoveTimeEntry}
         />
       ) : null}
 

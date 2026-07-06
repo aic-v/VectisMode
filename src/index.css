@@ -17,6 +17,19 @@
   --shadow-card-hover: 0 2px 6px rgba(24, 24, 24, 0.08), 0 16px 34px -24px rgba(24, 24, 24, 0.32);
   --shadow-card-drag: 0 18px 42px -24px rgba(24, 24, 24, 0.36), 0 8px 18px -14px rgba(24, 24, 24, 0.28);
 
+  --warn-color: #a16413;
+  --warn-bg: #fbf4e6;
+  --warn-border: rgba(161, 100, 19, 0.32);
+
+  /* Work-category palette — categorical slots in fixed order, validated for
+     CVD separation and the light panel surface (see AGENTS.md, Timesheets). */
+  --cat-client: #2a78d6;
+  --cat-bd: #1baf7a;
+  --cat-research: #eda100;
+  --cat-product: #008300;
+  --cat-training: #4a3aa7;
+  --cat-admin: #e34948;
+
   --radius-panel: 10px;
   --radius-card: 8px;
   --page-x: clamp(12px, 1.6vw, 24px);
@@ -1167,6 +1180,1092 @@ button.projection-backdrop {
 
 .archive-empty p {
   color: var(--text-secondary);
+}
+
+/* --- TIME LEDGER (shared bits) --- */
+.category-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.details-footer-button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* --- MATTER TIME SECTION --- */
+.matter-time-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.matter-time-total {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--accent-color);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.matter-time-total:hover,
+.matter-time-total:focus-visible {
+  background: rgba(47, 120, 189, 0.08);
+  outline: none;
+}
+
+.matter-time-quickadd {
+  display: grid;
+  grid-template-columns: 64px minmax(120px, 160px) 130px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.matter-time-add {
+  appearance: none;
+  border: none;
+  border-radius: 6px;
+  background: var(--text-primary);
+  color: #ffffff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: background-color 0.18s ease, opacity 0.18s ease;
+}
+
+.matter-time-add:hover {
+  background: #11100f;
+}
+
+.matter-time-add:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.matter-time-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.matter-time-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  padding: 5px 0;
+  border-top: 1px dashed var(--border-color);
+}
+
+.matter-time-item:first-child {
+  border-top: none;
+}
+
+.matter-time-item-date {
+  flex: 0 0 auto;
+  width: 5.6rem;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.matter-time-item-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matter-time-item-hours {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+
+/* --- TIMESHEET OVERLAY --- */
+.timesheet-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.timesheet-scope {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.timesheet-scope button {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 11px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.timesheet-scope button.is-active {
+  background: #ffffff;
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(24, 24, 24, 0.1);
+}
+
+.timesheet-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.timesheet-filter .form-input {
+  width: auto;
+  padding: 5px 10px;
+}
+
+.timesheet-matter-filter,
+.timesheet-hide-billed {
+  gap: 6px;
+  color: var(--text-secondary);
+}
+
+.timesheet-export {
+  appearance: none;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.timesheet-export:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-card);
+}
+
+.timesheet-export:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.timesheet-groups {
+  gap: 14px;
+}
+
+.timesheet-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding-bottom: 4px;
+}
+
+.time-entry-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.time-entry-row {
+  display: grid;
+  grid-template-columns: 5.4rem 6.2rem minmax(120px, 1fr) 10rem minmax(120px, 1.4fr) 4.6rem auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--card-bg);
+  font-size: 13px;
+}
+
+.time-entry-date {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.time-entry-member {
+  font-weight: 500;
+}
+
+.time-entry-matter {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+  overflow: hidden;
+}
+
+.time-entry-matter,
+.time-entry-matter .time-entry-client {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.time-entry-client {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.time-entry-category {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.time-entry-narrative {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  padding: 3px 6px;
+  border-radius: 4px;
+}
+
+.time-entry-narrative:hover {
+  background: rgba(36, 36, 36, 0.04);
+}
+
+.time-entry-narrative:focus {
+  outline: none;
+  background: rgba(36, 36, 36, 0.04);
+  box-shadow: inset 0 -2px 0 0 var(--accent-color);
+}
+
+.time-entry-hours {
+  width: 4.4rem;
+  border: 1px solid transparent;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.time-entry-hours:hover,
+.time-entry-hours:focus {
+  border-color: var(--border-color);
+  background: #ffffff;
+  outline: none;
+}
+
+.time-entry-billable {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.time-entry-delete {
+  width: 26px;
+  height: 26px;
+}
+
+.time-entry-row--totals {
+  grid-template-columns: 6.2rem 1fr auto;
+  color: var(--text-secondary);
+}
+
+.time-entry-totals-note {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.time-entry-hours-static {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.timesheet-private-note {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.time-entry-row--billed {
+  background: var(--panel-bg);
+  color: var(--text-secondary);
+}
+
+.time-entry-row--billed .time-entry-narrative,
+.time-entry-row--billed .time-entry-hours {
+  color: var(--text-secondary);
+}
+
+.time-entry-billed-chip {
+  appearance: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 2px 9px;
+  cursor: pointer;
+  transition: border-color 0.18s ease, color 0.18s ease;
+}
+
+.time-entry-billed-chip:hover,
+.time-entry-billed-chip:focus-visible {
+  border-color: var(--warn-border);
+  color: var(--warn-color);
+  outline: none;
+}
+
+.timesheet-rates-toggle.is-active {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px rgba(47, 120, 189, 0.12);
+}
+
+.rates-editor {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--panel-bg);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rates-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.rates-editor-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+  padding: 3px 0;
+}
+
+.rates-editor-currency {
+  justify-content: flex-start;
+}
+
+.rates-input {
+  width: 6.5rem;
+  padding: 4px 10px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rates-editor-note {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.timesheet-value {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.timesheet-value em {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.my-time-nudge {
+  font-size: 12.5px;
+  color: var(--warn-color);
+}
+
+@media (max-width: 720px) {
+  .rates-editor-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.timesheet-footer {
+  margin-top: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.timesheet-total {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.timesheet-legend {
+  margin-left: auto;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.timesheet-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+/* --- MY TIME PANEL (week strip) --- */
+.my-centre-grid .my-time-panel,
+.my-time-panel {
+  height: auto;
+  gap: 10px;
+}
+
+.my-time-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.my-time-figures {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.my-time-figures strong {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.1;
+}
+
+.my-time-figures span {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.my-time-open {
+  appearance: none;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.my-time-open:hover {
+  background: #ffffff;
+  color: var(--text-primary);
+}
+
+.my-time-strip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.my-time-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.my-time-day-total {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-height: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.my-time-bar {
+  width: 28px;
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-start;
+  gap: 2px; /* the 2px surface spacer between stacked segments */
+  border-bottom: 1px solid var(--border-strong);
+  padding-bottom: 2px;
+}
+
+.my-time-segment {
+  width: 100%;
+  border-radius: 3px;
+}
+
+.my-time-day-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.my-time-day.is-today .my-time-day-label {
+  color: var(--accent-color);
+  font-weight: 600;
+}
+
+.my-time-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.my-time-empty {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 720px) {
+  .matter-time-quickadd {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .matter-time-narrative {
+    grid-column: 1 / -1;
+  }
+
+  .matter-time-add {
+    grid-column: 1 / -1;
+  }
+
+  .time-entry-row {
+    grid-template-columns: 1fr auto;
+    row-gap: 4px;
+  }
+
+  .timesheet-export {
+    margin-left: 0;
+  }
+}
+
+/* --- STATUS CHECK (7-day Waiting Response watchdog) --- */
+.card-front--alert {
+  border-color: var(--warn-border);
+  box-shadow: inset 3px 0 0 0 var(--warn-color), var(--shadow-card);
+}
+
+.card-front--alert:hover {
+  border-color: var(--warn-border);
+  box-shadow: inset 3px 0 0 0 var(--warn-color), var(--shadow-card-hover);
+}
+
+.status-check-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-panel);
+  background: var(--warn-bg);
+  color: var(--warn-color);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.status-check-banner > svg {
+  flex: 0 0 auto;
+}
+
+.status-check-banner-item {
+  appearance: none;
+  border: 1px solid var(--warn-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--warn-color);
+  padding: 3px 11px;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.status-check-banner-item:hover,
+.status-check-banner-item:focus-visible {
+  background: #ffffff;
+  outline: none;
+}
+
+.status-check-panel {
+  border: 1px solid var(--warn-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--warn-bg);
+}
+
+.status-check-panel-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--warn-color);
+}
+
+.status-check-panel-hint {
+  margin: 4px 0 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.status-check-panel .restore-picker-option {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.status-check-panel-actions {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status-check-panel-actions .restore-picker-option {
+  flex: 1 1 auto;
+}
+
+.status-check-archive {
+  color: var(--warn-color);
+  font-weight: 500;
+}
+
+/* --- MY COMMAND CENTRE --- */
+.my-centre {
+  display: flex;
+  flex-direction: column;
+  gap: var(--grid-gap);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.my-centre-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.identity-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.identity-select {
+  width: auto;
+  min-width: 150px;
+  border-radius: 999px;
+  padding: 5px 14px;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.my-centre-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  gap: var(--grid-gap);
+  align-items: stretch;
+}
+
+/* Leaves room for the toolbar and the my-time strip above the grid so the
+   fixed bottom controls never overlap the chat input. */
+.my-centre-grid .my-panel {
+  --panel-height: max(430px, calc(100vh - 400px));
+}
+
+.panel-subtitle {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.my-planner-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(36, 36, 36, 0.16) transparent;
+}
+
+.planner-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.planner-alerts {
+  border: 1px solid var(--warn-border);
+  border-radius: 10px;
+  background: var(--warn-bg);
+  padding: 10px 12px;
+}
+
+.planner-alert-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--warn-color);
+}
+
+.planner-empty {
+  color: var(--text-secondary);
+  font-size: 13.5px;
+}
+
+.agenda-item {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-card);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.agenda-item:hover,
+.agenda-item:focus-visible {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-card-hover);
+  outline: none;
+}
+
+.agenda-item--alert {
+  border-color: var(--warn-border);
+  box-shadow: inset 3px 0 0 0 var(--warn-color), var(--shadow-card);
+}
+
+.agenda-item-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.agenda-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.agenda-item-flag {
+  color: var(--warn-color);
+  font-weight: 500;
+}
+
+.calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.calendar-nav {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.calendar-nav .icon-button {
+  width: 26px;
+  height: 26px;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.calendar-weekday {
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 4px 0;
+}
+
+.calendar-day {
+  position: relative;
+  min-height: 34px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid transparent;
+}
+
+.calendar-day--pad {
+  background: transparent;
+}
+
+.calendar-day--today {
+  border-color: var(--accent-color);
+  font-weight: 600;
+}
+
+.calendar-day--due {
+  background: #ffffff;
+  border-color: var(--border-strong);
+}
+
+.calendar-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent-color);
+}
+
+/* --- AGENT CHAT --- */
+.agent-chat {
+  min-width: 0;
+}
+
+.chat-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 4px 2px 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(36, 36, 36, 0.16) transparent;
+}
+
+.chat-welcome {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.chat-welcome svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--accent-color);
+}
+
+.chat-welcome p {
+  margin: 0;
+}
+
+.chat-bubble {
+  max-width: 88%;
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-bubble--user {
+  align-self: flex-end;
+  background: var(--text-primary);
+  color: #ffffff;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-bubble--assistant {
+  align-self: flex-start;
+  background: #ffffff;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-bottom-left-radius: 4px;
+}
+
+.chat-bubble--typing {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  min-height: 20px;
+}
+
+.chat-bubble--typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text-muted);
+  animation: chat-typing 1.1s ease-in-out infinite;
+}
+
+.chat-bubble--typing span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.chat-bubble--typing span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@keyframes chat-typing {
+  0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-bubble--typing span {
+    animation: none;
+  }
+}
+
+.chat-input-row {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.chat-input {
+  flex: 1 1 auto;
+  border-radius: 999px;
+  padding: 8px 14px;
+}
+
+.chat-send {
+  appearance: none;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 999px;
+  background: var(--text-primary);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.18s ease, opacity 0.18s ease;
+}
+
+.chat-send:hover {
+  background: #11100f;
+}
+
+.chat-send:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.chat-send:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(47, 120, 189, 0.2);
+}
+
+@media (max-width: 1180px) {
+  .my-centre-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  }
+
+  .my-centre-grid .my-panel {
+    --panel-height: max(420px, calc(100vh - 410px));
+  }
+}
+
+@media (max-width: 720px) {
+  .my-centre-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .my-centre-grid .my-panel {
+    --panel-height: 480px;
+  }
+
+  .my-centre-toolbar {
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 1180px) {

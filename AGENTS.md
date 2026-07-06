@@ -9,9 +9,9 @@ Vectis Law Command Center is a Vite + React dashboard for a technology law pract
 - Four team columns: `Partner A`, `Partner B`, `Associate 1`, `Associate 2`.
 - Two bottom-row columns: `Available` (left), `Waiting Response` (right).
 
-Cards are draggable between columns with `@dnd-kit`. The board distinguishes two card interactions, which trigger different overlays — see [Card Interaction Modes](#card-interaction-modes).
+Cards are draggable between columns with `@dnd-kit`. The board distinguishes two card interactions, which trigger different overlays — see [Card Surfaces](#card-surfaces).
 
-A bottom-left segmented control toggles between a `Team` view and a `My Command Centre` view. It currently only updates `commandMode` state — it does not filter board content yet. Filtering behaviour is open; see [roadmap.md, Wire the Team / My Command Centre toggle](roadmap.md#31-wire-the-team--my-command-centre-toggle).
+A bottom-left segmented control toggles between the `Team` board and `My Command Centre`, a personalised view with a day planner and an agent chat — see [My Command Centre](#my-command-centre).
 
 The `Vectis Law Command Center` label is a small fixed element in the bottom-right of the viewport, intentionally low-emphasis so visual weight stays on the cards. An `Archive` button sits immediately to its left — see [Archive](#archive).
 
@@ -22,15 +22,23 @@ The `Vectis Law Command Center` label is a small fixed element in the bottom-rig
 - Vanilla CSS in [src/index.css](src/index.css)
 - Drag and drop: `@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities`
 - Icons: `lucide-react`
+- Tests: Vitest (unit), `@playwright/test` (E2E)
 
 ## Files of Interest
 
-- [src/App.jsx](src/App.jsx) — React components, drag/overlay state, orchestration of status changes.
-- [src/board.js](src/board.js) — pure helpers for moves, reorders, status changes, drag landing, work-log and history appends. All board mutations go through these.
-- [src/board.test.js](src/board.test.js) — Vitest coverage of the helpers above.
-- [src/index.css](src/index.css) — design tokens, layout, projection/flip animations, responsive rules.
+- [src/App.jsx](src/App.jsx) — React components for the team board and overlays, drag state, orchestration of status changes and the status-check sweep.
+- [src/board.js](src/board.js) — pure helpers for every board mutation: moves, reorders, status changes (with column coupling), drag landing, work-log/history appends, and the status-check family. All board mutations go through these.
+- [src/MyCommandCentre.jsx](src/MyCommandCentre.jsx) — the personalised view: identity picker, day planner, agent chat.
+- [src/time.js](src/time.js) — the time ledger: work categories, entry validation, filters/totals/week buckets, sharing-level enforcement, and the Zoho-mappable CSV export. Pure module — see [Time Ledger & Timesheets](#time-ledger--timesheets).
+- [src/Timesheets.jsx](src/Timesheets.jsx) — the Timesheet overlay: Me/Firm scope, period + grouping filters, inline entry editing, CSV download.
+- [src/agent.js](src/agent.js) — the Vectis Assistant. `getAgentReply` is the seam for a future real agent endpoint; today it answers with local rules over the live board and ledger, and parses `log …` commands (its first write capability). Also holds due-date parsing/classification and the "my matters" heuristic.
+- [src/storage.js](src/storage.js) — versioned localStorage persistence (board, identity, chat, time entries, sharing levels, rates) with shape validation.
+- [src/remote.js](src/remote.js) / [src/useRemoteSync.js](src/useRemoteSync.js) — env-gated Supabase sync (see [Persistence](#persistence)); [supabase/migrations](supabase/migrations) holds the schema.
+- [src/index.css](src/index.css) — design tokens (including the validated work-category palette), layout, projection/flip animations, status-check, My Command Centre, and timesheet styles, responsive rules.
+- [src/board.test.js](src/board.test.js), [src/time.test.js](src/time.test.js), [src/storage.test.js](src/storage.test.js), [src/agent.test.js](src/agent.test.js) — Vitest suites (96 tests).
+- [e2e/](e2e/) — Playwright suites (31 tests) with shared helpers in [e2e/helpers.js](e2e/helpers.js), configured by [playwright.config.js](playwright.config.js).
 
-Card data is hardcoded in `INITIAL_ITEMS` inside [src/board.js](src/board.js). There is no backend or persistence yet — see [roadmap.md, State, Persistence & Data Model](roadmap.md#2-state-persistence--data-model). No real AI integration yet either.
+Sample card data is hardcoded in `INITIAL_ITEMS` inside [src/board.js](src/board.js); on a fresh browser it seeds the board, after which localStorage state wins — see [Persistence](#persistence).
 
 ## Layout Rules
 
@@ -38,7 +46,8 @@ Card data is hardcoded in `INITIAL_ITEMS` inside [src/board.js](src/board.js). T
 - Top row: four team panels in a single grid (`.board-grid`).
 - Bottom row: two status panels in a separate grid (`.status-grid`), shorter than the top row.
 - Panel height is **fixed** (driven by `--panel-height`) and never changes due to card content or focus state. Overflowing cards scroll inside the panel via `.card-list`, with a minimal scrollbar that is transparent at rest and visible on hover/focus.
-- Responsive collapse: two columns at ≤1180px, single column at ≤720px. Real-browser validation is still outstanding (see [roadmap.md, Responsive behaviour](roadmap.md#54-responsive-behaviour)).
+- Responsive collapse: two columns at ≤1180px, single column at ≤720px. Validated in a real browser via the Playwright responsive spec ([e2e/responsive.spec.js](e2e/responsive.spec.js)).
+- Watch CSS specificity when overriding `--panel-height`: the base media queries set it on `.cutout-panel`, so view-specific overrides (e.g. `.my-centre-grid .my-panel`) must be more specific.
 
 ## Card Surfaces
 
@@ -51,15 +60,15 @@ Layout, top to bottom:
 1. `.card-heading` — title (primary) plus the card's **client** as a muted subtitle directly beneath. The subtitle is omitted when `card.client` is empty.
 2. `.card-widgets` — two compact meta-items, `Status` and `Due date`, in a mini version of `.details-meta-grid`. Status icon comes from `STATUS_META` in [src/App.jsx](src/App.jsx). Missing values fall back to `Not set` / `No due date`.
 
-Sample statuses populated in `INITIAL_ITEMS`: `Not Started` · `Research and Planning` · `Drafting` · `Reviewing` · `Waiting` · `Done`. These are loose strings — no enum enforcement, no behavioural coupling between status and column placement yet. See [roadmap.md, Status model](roadmap.md#13-status-model-enum-coupling-and-driven-moves).
+Statuses (`STATUS_KEYS` in [src/board.js](src/board.js)): `Not Started` · `Research and Planning` · `Drafting` · `Reviewing` · `Waiting` · `Status Check` · `Done`. `Waiting`, `Status Check`, and `Done` are coupled to columns — see [Status & Column Coupling](#status--column-coupling).
 
-Client is a true enum on the Matter view — values are constrained to the `CLIENTS` list in `App.jsx`. The card front renders whatever string the card holds.
+Cards with status `Status Check` get an amber left-edge treatment (`.card-front--alert`).
 
 ### Drag-flip work-log editor (`ProjectedCard`)
 
 Triggered when a card is dragged into a *different* column. The overlay copy animates out of the landed card, flips to `WorkLogForm`, and reverses on Save. The form uses the same kicker (`Log work`) + h2 (card title) header as the details view, with an `X` close button on the right.
 
-All fields are controlled: **Status** (defaulted to the card's current status), Description, Start date, End date, Est. hours, Next steps. On Save, the form passes both `{ status }` and a full `entry` object (with `loggedAt` timestamp) up through `ProjectedCard.handleSave` → `App.onSave`. Status flows through `applyStatusChange` (which routes through `setCardStatus` for status↔column coupling — see [Status & Column Coupling](#status--column-coupling)). The work-log entry is appended via `appendWorkLogEntry` only if it has any actual content.
+All fields are controlled: **Status** (defaulted to the card's current status), Description, Start date, End date, Est. hours, Next steps. On Save, the form passes both `{ status }` and a full `entry` object (with `loggedAt` timestamp) up through `ProjectedCard.handleSave` → `App.onSave`. Status flows through `applyStatusChange` (which routes through `setCardStatus` for status↔column coupling). The work-log entry is appended via `appendWorkLogEntry` only if it has any actual content.
 
 Cancel behavior: clicking the `X` discards any unsaved form entry and **reverts the move** — the card returns to its origin column. Two snapshots taken in `handleDragStart` drive this: `preDragItemsRef` (the `items` state) and `preDragRectRef` (the dragged card's `getBoundingClientRect`).
 
@@ -69,28 +78,102 @@ On cancel, the projection animates back to `preDragRectRef` (the card's original
 
 Triggered when a card is clicked without being dragged. Seven fields are inline-editable: **title**, **due date** (loose text input), **status** (select of `STATUS_META` keys), **owner** (text), **team** (text), **client** (select of `CLIENTS`), and **description**. The five meta fields sit in `.details-meta-grid` — two rows of two side-by-side, with `Client` spanning the full width on the third row via `.details-meta-item--wide`. Edits flow through an `onCardChange(cardId, patch)` callback into the `updateCard` reducer on `App`, which merges the patch into the matching card. There is no Save button — changes propagate immediately, and any fields the card front surfaces re-render from the same source.
 
-Below the description, a `.details-footer` pins two external links to the bottom: `Time entries` (left) and `Task folder` (right). Both call `event.preventDefault()` for now — see [roadmap.md, Real navigation for details-view links](roadmap.md#24-real-navigation-for-details-view-links).
+Below the description, a `.details-footer` pins two links to the bottom: `Time entries` (left) and `Task folder` (right). When the card provides `timeEntriesUrl` / `taskFolderUrl` (all sample cards do), the links open those URLs in a new tab; otherwise they render as inert `#` anchors.
+
+When the card's status is `Status Check`, a resolution panel renders above the description — see [Status Check Workflow](#status-check-workflow).
 
 - Status icon next to the select stays in sync with the selected value.
-- The three external-link fields (`Open tasks`, `Time entries`, `Task folder`) are not editable — they remain anchors.
 - Closes on backdrop click, the X button, or `Escape`. When focus is inside an editable field, `Escape` blurs the field first; a second `Escape` closes the overlay.
 - Card clicks are suppressed for ~500ms after `dragStart` / `dragEnd` via `suppressCardOpenUntilRef`, so a drop never inadvertently opens the details view.
-
-Optional card fields consumed by the details view: `dueDate`, `description`, `tasksUrl`, `timeEntriesUrl`, `taskFolderUrl`. Sample `status` and `dueDate` are populated in `INITIAL_ITEMS`; the other three are not — see [roadmap.md, Populate details-view fields](roadmap.md#23-populate-details-view-fields-on-real-card-data). Links currently call `event.preventDefault()` — see [roadmap.md, Real navigation for details-view links](roadmap.md#24-real-navigation-for-details-view-links). Edits are not persisted across sessions — see [roadmap.md, Backend persistence](roadmap.md#22-backend-persistence).
 
 ## Status & Column Coupling
 
 Status and column placement are a **single source of truth**, coordinated by helpers in [src/board.js](src/board.js):
 
 - Status `Waiting` ⟺ column `waiting` (Waiting Response).
+- Status `Status Check` ⟺ column `waiting` (a flagged card stays in Waiting Response).
 - Status `Done` ⟺ column `archive`.
 
 Two pure entry points drive everything:
 
-- **`setCardStatus(items, cardId, newStatus, { now, destinationColumn })`** — used by Matter view edits and work-log Save. Moves the card into the required column when status is `Waiting` or `Done`, and out of `waiting`/`archive` when status changes away. Stashes `previousColumn` and `previousStatus` on the card so a card returning from `waiting` lands back where it came from. **Refuses** to leave `Done` without an explicit `destinationColumn` — returns `{ requiresDestination: true }` so the UI can prompt.
-- **`applyDragLanding(items, cardId, { fromColumn, now })`** — called from `handleDragEnd` once a drag actually crosses containers. Drops into `waiting` force status `Waiting`; drags out of `waiting` restore `previousStatus` (default `Reviewing`). Drops onto `archive` are blocked at the helper level (`moveCardAcross`).
+- **`setCardStatus(items, cardId, newStatus, { now, destinationColumn })`** — used by Matter view edits, work-log Save, and status-check resolution. Moves the card into the required column when the new status is coupled, and out of `waiting`/`archive` when status changes away. Stashes `previousColumn` and `previousStatus` so a returning card lands back where it came from. **Refuses** to leave `Done` without a valid `destinationColumn` — returns `{ requiresDestination: true }` so the UI can prompt; unknown column ids and `archive` are rejected the same way. Also maintains `waitingSince` (stamped entering `waiting`, cleared leaving, restarted on `Status Check` → `Waiting`) and `statusCheckAt`.
+- **`applyDragLanding(items, cardId, { fromColumn, now })`** — called from `handleDragEnd` once a drag actually crosses containers. Drops into `waiting` force status `Waiting` and stamp `waitingSince`; drags out of `waiting` restore `previousStatus` (default `Reviewing`) and clear `waitingSince`/`statusCheckAt`. Drops onto `archive` are blocked at the helper level (`moveCardAcross`).
 
 Both helpers append events to `card.history` so the audit trail stays consistent with state.
+
+## Status Check Workflow
+
+The 7-day Waiting-Response watchdog (roadmap item now shipped; remaining work in [roadmap.md §5.1](roadmap.md#61-status-check--remaining-work)):
+
+- Every card entering the `waiting` column gets `waitingSince`. A sweep in `App` (on mount, then every 60s) calls `applyStatusChecks`, which flags `Waiting` cards older than `STATUS_CHECK_THRESHOLD_DAYS` (7) as status **`Status Check`** and stamps `statusCheckAt`. The sweep is idempotent — already-flagged cards are untouched.
+- Surfacing: amber card front, a `.status-check-banner` above the team board (each flagged matter is a click-to-open chip), and an alerts section at the top of the My Command Centre planner.
+- Resolution happens in the Matter view's `StatusCheckPanel` via `resolveStatusCheck`, with three actions:
+  - **Assign to <column>** — moves the card there and restores the stashed `previousStatus` (default `Reviewing`).
+  - **Keep waiting** — status back to `Waiting`, `waitingSince` restarted (a fresh 7-day clock).
+  - **Archive matter** — status `Done`, card moves to the archive.
+- Dragging a flagged card out of `waiting` also clears the flag (restores previous status).
+- The seeded sample card `c4` ships with `waitingSince` nine days in the past so the workflow fires on first load of a fresh browser.
+
+## My Command Centre
+
+`commandMode === 'mine'` replaces the board with [src/MyCommandCentre.jsx](src/MyCommandCentre.jsx): a "Sharing" + "Viewing as" toolbar, the full-width **My time** week strip, then a two-column grid (day planner left, agent chat right).
+
+- **Identity** — a select over `TEAM_MEMBERS` ([src/board.js](src/board.js)), persisted to localStorage. "My matters" = the member's column plus cards in `waiting`/`available` whose `owner` matches the member name (heuristic until an assignee model exists — [roadmap 1.3](roadmap.md#13-assignee-model)).
+- **My time** — this week's hours as category-stacked daily bars with total and billable %, plus an "Open timesheet" shortcut. See [Time Ledger & Timesheets](#time-ledger--timesheets).
+- **Day planner** — status-check alerts first, then the agenda grouped Overdue / Due today / Next 7 days / Later / No due date (flagged cards are excluded from these groups to avoid duplication), then a Monday-first month calendar with dots on days where matters are due. Agenda items open the regular Matter view.
+- **Agent chat ("Vectis Assistant")** — message list + input. Replies come from `getAgentReply` in [src/agent.js](src/agent.js): today a local rules engine over the live board and time ledger (due dates, waiting matters, status checks, workload, weekly time summaries), plus the `log …` command which writes a ledger entry via the `timeEntry` field on the structured reply. The function is the single seam to swap in a real agent endpoint. Chat history persists to localStorage. The panel is labelled "preview" and the empty state says replies are generated locally.
+
+The panel heights budget for the toolbar and time strip (`.my-centre-grid .my-panel`) so the fixed bottom controls never overlap the chat input — validated by the responsive spec.
+
+## Time Ledger & Timesheets
+
+Time is a **global ledger** ([src/time.js](src/time.js)), not card data — because firm time (business development, training, product work) does not always have a matter card. Card work-logs *feed* the ledger; the ledger is the single source of truth for hours. Direction settled with the user (July 2026): the tool's primary purpose is individual-first productivity visibility, with org visibility subject to the individual's comfort and billing timesheets as a by-product.
+
+**Entry shape:** `{ id, memberId, cardId?, matterTitle?, client?, category, date (YYYY-MM-DD), hours, narrative, billable, loggedAt }`. Entries are validated by `normalizeTimeEntry` on every write and on load.
+
+**Work categories** (`WORK_CATEGORIES`): Client Work (billable by default) · Business Development · Research & Writing · Product & Tech · Training · Firm Administration. The category defaults the `billable` flag; it is overridable per entry. Value is deliberately not billable-only — the categories exist so non-billable contributions are visible. Category colors are CSS custom properties (`--cat-<key>`) — categorical palette slots in fixed order, CVD-validated against the panel surface.
+
+**Three capture surfaces**, all stamping the current identity and funnelling through `App.logTime`:
+
+1. The drag-flip **work-log form** — hours + a new category select; saving also appends a card work-log entry as before.
+2. The **quick-add row** in the Matter view's Time section (hours, category, date, narrative). The section lists the matter's latest entries and a running total; the footer's `Time entries` button opens the Timesheet overlay pre-filtered to the matter.
+3. The **assistant chat** — `parseLogCommand` understands e.g. `log 1.5h on the Acme MSA for reviewing the cap yesterday` / `log 45m of business development` (hours or minutes, matter fuzzy-matched by title/client words, category keywords, today/yesterday, narrative after "for").
+
+**Sharing levels** (`SHARE_LEVELS`, picked per member in the My Command Centre toolbar, stored in `vectis:sharing:v1`): `full` (default — org sees entries) · `totals` (org sees only aggregate hours) · `private` (excluded, but counted so firm views say "N members private" rather than under-reporting silently). `applyShareLevels` enforces this in the Firm scope; the Me scope always shows the member their own detail.
+
+**Surfaces:** the **My time panel** in My Command Centre (week strip of category-stacked bars, total + billable %, legend, and an unaccounted-time nudge listing weekdays with nothing logged) and the **Timesheet overlay** ([src/Timesheets.jsx](src/Timesheets.jsx)) reachable from the fixed header button, the My time panel, or a matter footer — Me/Firm scope, period presets, grouping by date/matter/client/category, inline narrative/hours/billable editing, delete, and **Export CSV** with Zoho Books-mappable columns (`Date, User, Client, Matter, Category, Notes, Hours, Billable Status, Rate, Amount, Billed At`). Decision on record: export stays neutral CSV, shaped for a later Zoho Books integration.
+
+**Rates** (`vectis:rates:v1`, edited in the overlay's Rates panel): an hourly rate per member plus per-client overrides that win when both apply, and a currency symbol (default `£`). `valueOfEntries` prices billable entries only and reports unrated hours separately — a missing rate is visible, never silently zero. The overlay footer shows the priced value; the CSV carries Rate/Amount columns.
+
+**Mark-as-billed:** "Mark shown as billed" stamps `billedAt` on every visible unbilled entry so a closed period can never be double-exported. Billed rows lock (inputs disabled, delete hidden) and show a `Billed` chip — clicking the chip unmarks. A "Hide billed" filter excludes them from view and export.
+
+**Nudges:** `unloggedWeekdays` finds Mon–Fri days this week (before today) with zero logged hours for the member; the My time panel and the assistant's weekly time summary both surface them. Activity-based nudges ("you moved cards but logged nothing") need actor attribution on history events — deferred until a real user model exists.
+
+## Persistence
+
+Two layers: localStorage always (cache + offline fallback), and an **env-gated Supabase remote** for multi-device sync.
+
+### Remote (Supabase)
+
+Configured by `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` in `.env.local` (see [.env.example](.env.example)); without them the app is local-only, which is also how every test suite runs. The schema lives in [supabase/migrations/0001_init.sql](supabase/migrations/0001_init.sql) — apply it via the Supabase SQL editor.
+
+- **Model:** the board is one JSONB document per workspace (`boards.state` — cards are heavily interlinked, so document sync first); `time_entries`, `rates`, and `sharing_levels` are relational rows because the ledger is the sensitive, reportable data.
+- **Sync** ([src/remote.js](src/remote.js) + [src/useRemoteSync.js](src/useRemoteSync.js)): remote wins on load; after hydration, local changes write through (board debounced as a document, ledger as a diffed change-set, rates/sharing as upserts with echo guards). Realtime subscriptions apply other clients' changes live; our own board echoes are filtered by a per-session `CLIENT_ID`. Every IO helper swallows errors with a `console.warn` — remote failure never breaks local UX. Conflict strategy is last-write-wins (v1).
+- **RLS:** enabled on all tables with **temporary permissive pre-auth policies** — the consent model stays client-enforced until Supabase Auth ships (auth-phase policy sketch at the bottom of the migration). Do not treat sharing levels as a security boundary yet.
+- Never put the service-role key or database password in env files or the repo — the publishable key only.
+
+### Local (localStorage)
+
+Versioned keys in [src/storage.js](src/storage.js):
+
+- `vectis:board:v1` — the full `items` object, saved on every change, validated with `isValidBoard` on load (bad/missing data falls back to `INITIAL_ITEMS`).
+- `vectis:identity:v1` — the My Command Centre identity.
+- `vectis:chat:v1` — assistant chat history.
+- `vectis:time:v1` — the time ledger; entries are validated individually on load so one corrupt entry drops out without discarding the ledger.
+- `vectis:sharing:v1` — per-member time-sharing levels.
+- `vectis:rates:v1` — hourly rates (per member + per-client overrides) and currency.
+
+Bump a key's version to invalidate stored state after a schema change.
 
 ## Archive
 
@@ -112,19 +195,20 @@ Mechanics:
 
 - Smooth, slower flip.
 - No overshoot easing, no bounce-back at the end.
-- `prefers-reduced-motion: reduce` is honoured in CSS. Preserve or improve this when touching animation code.
+- `prefers-reduced-motion: reduce` is honoured in CSS (flip, projection, and the chat typing indicator). Preserve or improve this when touching animation code.
 
 ## Known Gaps (in current code)
 
 These are facts about today's code. The plan to address each lives in [roadmap.md](roadmap.md).
 
-1. Card state is not persisted across sessions — refresh resets everything.
-2. Team columns are hardcoded (`Partner A` … `Associate 2`); no dynamic roster.
-3. `commandMode` toggle does not filter the board.
-4. Details overlay's link fields (`tasksUrl`, `timeEntriesUrl`, `taskFolderUrl`) fall back to `#` because `INITIAL_ITEMS` does not provide them.
-5. No browser E2E tests (Vitest covers the reducer; UI is untested).
-6. Responsive behaviour exists in CSS but has not been validated in a real browser.
-7. No real AI integration — `aiContext` is hand-authored placeholder text.
+1. Supabase sync exists but has no auth — anyone with the app URL and publishable key reads/writes everything (permissive pre-auth RLS). Sharing levels are a client-side contract until Auth + real RLS land. Sync is last-write-wins with no offline queue.
+2. Team columns are hardcoded via `TEAM_MEMBERS`; no dynamic roster, no manager role (status-check resolution is not permission-gated, and identity is a picker, not a login).
+3. The assistant chat is a local rules engine, not a real agent; `aiContext` remains hand-authored placeholder text.
+4. "Notify users and manager" for status checks means in-app surfacing only — no email/push.
+5. "My matters" relies on the free-text `owner` field matching the member name.
+6. Timesheets have no invoice push — CSV export only (rates and mark-as-billed exist; the Zoho Books integration is the missing last mile).
+7. No component-level tests (`@testing-library/react`); coverage is pure helpers + browser E2E.
+8. No CI pipeline.
 
 ## Verification
 
@@ -132,19 +216,24 @@ Known-green commands:
 
 ```bash
 npm run lint
-npm test
+npm test          # Vitest, 106 tests
 npm run build
+npm run test:e2e  # Playwright, 32 tests (starts its own dev server)
 ```
 
-Dev server (used during the latest sessions):
+Playwright launches the `chromium` project. If the exact Playwright browser build is not downloaded (e.g. sandboxed environments with a pre-installed browser), point it at a system Chromium:
+
+```bash
+PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium npm run test:e2e
+```
+
+Dev server:
 
 ```bash
 npm run dev -- --host 127.0.0.1
 ```
 
-Local URL: `http://127.0.0.1:5173/` (Vite will fall back to `5174` if the port is taken).
-
-Interactive browser testing has not been wired up. Playwright is not installed — see [roadmap.md, Browser E2E tests](roadmap.md#62-browser-e2e-tests).
+Local URL: `http://127.0.0.1:5173/` (Vite will fall back to `5174` if the port is taken). Note that board state persists in localStorage — clear the `vectis:*` keys (or use a fresh profile) to see the seeded board.
 
 ## What's Next
 
