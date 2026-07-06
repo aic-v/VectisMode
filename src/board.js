@@ -28,7 +28,7 @@ export const COLUMN_TITLES = {
   archive: 'Archive',
 };
 
-export const RESTORE_COLUMNS = ['user-1', 'user-2', 'user-3', 'user-4', 'available', 'waiting'];
+export const RESTORE_COLUMNS = ['user-1', 'user-2', 'user-3', 'user-4', 'available'];
 
 export const STATUS_TO_COLUMN = {
   Waiting: 'waiting',
@@ -188,11 +188,12 @@ export function setCardStatus(items, cardId, newStatus, { now, destinationColumn
     return { items, requiresDestination: false };
   }
 
-  if (currentStatus === 'Done' && newStatus !== 'Done' && !destinationColumn) {
+  const required = requiredColumnFor(newStatus);
+
+  if (currentStatus === 'Done' && newStatus !== 'Done' && !required && !destinationColumn) {
     return { items, requiresDestination: true };
   }
 
-  const required = requiredColumnFor(newStatus);
   const wasCoupled = isCoupledColumn(currentColumn);
   let targetColumn = currentColumn;
   const patch = { status: newStatus };
@@ -204,8 +205,9 @@ export function setCardStatus(items, cardId, newStatus, { now, destinationColumn
       targetColumn = required;
     }
   } else if (wasCoupled) {
-    targetColumn =
-      destinationColumn ?? card.previousColumn ?? 'available';
+    const safeDestination =
+      destinationColumn && !isCoupledColumn(destinationColumn) ? destinationColumn : null;
+    targetColumn = safeDestination ?? card.previousColumn ?? 'available';
     patch.previousColumn = null;
     patch.previousStatus = null;
   }
